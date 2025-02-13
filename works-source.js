@@ -109,8 +109,8 @@ export default {
 						const URL = URLs[Math.floor(Math.random() * URLs.length)];
 						return envKey === 'URL302' ? Response.redirect(URL, 302) : fetch(new Request(URL, request));
 					}
-					return new Response('请设置你的UUID变量，或尝试重试部署，检查变量是否生效？', { status: 404, headers: { "Content-Type": "text/plain;charset=utf-8" } });
-					// return new Response(JSON.stringify(request.cf, null, 4), { status: 200 });
+					// return new Response('请设置你的UUID变量，或尝试重试部署，检查变量是否生效？', { status: 404, headers: { "Content-Type": "text/plain;charset=utf-8" } });
+					return new Response(JSON.stringify(request.cf, null, 4), { status: 200 });
 				case `/${fakeUserID}`:
 					const fakeConfig = await getVLESSConfig(userID, request.headers.get('Host'), sub, 'CF-Workers-SUB', RproxyIP, url);
 					return new Response(`${fakeConfig}`, { status: 200 });
