@@ -30,16 +30,21 @@ jobs:
           javascript-obfuscator works-source.js --output works-obfuscator.js \
           --compact true \
           --control-flow-flattening true \
-          --control-flow-flattening-threshold 1 \
+          --control-flow-flattening-threshold 0.75 \
           --dead-code-injection true \
-          --dead-code-injection-threshold 1 \
-          --identifier-names-generator hexadecimal \
+          --dead-code-injection-threshold 0.6 \
+          --identifier-names-generator mangled \
           --rename-globals true \
           --string-array true \
-          --string-array-encoding 'rc4' \
-          --string-array-threshold 1 \
+          --string-array-encoding 'base64,rc4' \
+          --string-array-threshold 0.75 \
+          --string-array-wrapping true \
           --transform-object-keys true \
-          --unicode-escape-sequence true
+          --unicode-escape-sequence true \
+          --shuffle-string-array true \
+          --split-strings true \
+          --split-strings-chunk-length 3
+          
       - name: Commit changes
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
