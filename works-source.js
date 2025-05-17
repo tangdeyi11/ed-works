@@ -12,7 +12,8 @@ let proxyIP = '';// 小白勿动，该地址并不影响你的网速，这是给
 let sub = '';// 留空则使用内置订阅
 let subconverter = 'subapi.cmliussss.net';// clash订阅转换后端，目前使用CM的订阅转换功能subapi-loadbalancing.pages.dev。也可以使用肥羊的订阅转换后端url.v1.mk，自带虚假uuid和host订阅。
 //let subconfig = "https://raw.githubusercontent.com/cmliu/ACL4SSR/main/Clash/config/ACL4SSR_Online_Full_MultiMode.ini"; //订阅配置文件
-let subconfig = "https://raw.githubusercontent.com/tangdeyi11/dyconfig/main/rule.ini";
+let subconfig = "https://raw.githubusercontent.com/tangdeyi11/dyconfig/main/rule.ini";                        //分流规则配置
+let dnsconfig = "https://raw.githubusercontent.com/tangdeyi11/dyconfig/refs/heads/main/singbox-dns.json";     //Singbox订阅转换的DNS配置
 
 // The user name and password do not contain special characters
 // Setting the address will ignore proxyIP
@@ -73,6 +74,7 @@ export default {
 			sub = env.SUB || sub;
 			subconverter = env.SUBAPI || subconverter;
 			subconfig = env.SUBCONFIG || subconfig;
+			dnsconfig = env.DNSCONFIG || dnsconfig;
 			if (socks5Address) {
 				try {
 					parsedSocks5Address = socks5AddressParser(socks5Address);
@@ -1390,10 +1392,10 @@ https://github.com/cmliu/edgetunnel
 		//通过订阅转换转换各种客户端的配置文件
 		if (!userAgent.includes(('CF-Workers-SUB').toLowerCase())){
 			if ((userAgent.includes('clash') && !userAgent.includes('nekobox')) || ( _url.searchParams.has('clash') && !userAgent.includes('subconverter'))) {
-				url = `https://${subconverter}/sub?target=clash&url=${encodeURIComponent(url)}&insert=false&config=${encodeURIComponent(subconfig)}&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
+				url = `https://${subconverter}/sub?target=clash&url=${encodeURIComponent(url)}&insert=false&config=${encodeURIComponent(subconfig)}&template=${encodeURIComponent(dnsconfig)}&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
 				isBase64 = false;
 			} else if (userAgent.includes('sing-box') || userAgent.includes('singbox') || (( _url.searchParams.has('singbox') || _url.searchParams.has('sb')) && !userAgent.includes('subconverter'))) {
-				url = `https://${subconverter}/sub?target=singbox&url=${encodeURIComponent(url)}&insert=false&config=${encodeURIComponent(subconfig)}&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
+				url = `https://${subconverter}/sub?target=singbox&url=${encodeURIComponent(url)}&insert=false&config=${encodeURIComponent(subconfig)}&template=${encodeURIComponent(dnsconfig)}&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
 				isBase64 = false;
 			}
 		}
