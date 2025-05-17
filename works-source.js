@@ -1409,7 +1409,15 @@ https://github.com/cmliu/edgetunnel
 					}});
 				content = await response.text();
 			}
-			if (!_url.pathname.includes(`/${fakeUserID}`)) content = revertFakeInfo(content, userID, hostName, isBase64);
+			
+			//由于原始订阅请求的url的UUID字段为fakeUserID前的明文，所以在以下检测部分发现!_url.pathname.includes(`/${fakeUserID}`匹配，便进行revertFakeInfo函数的明文转换
+			if (!_url.pathname.includes(`/${fakeUserID}`))  {
+                               content = revertFakeInfo(content, userID, hostName, isBase64);
+			       // 将 tls://1.1.1.1 修改为 tls://8.8.8.8  订阅转无法修改dns配置
+                               content = content.replace('tls://1.1.1.1', 'tls://8.8.8.8');
+                               // 将 query_type: ["A", "AAAA"] 修改为 query_type: ["A"]  订阅转无法修改dns配置
+                               content = content.replace('"query_type":["A","AAAA"]', '"query_type":["A"]');
+                        }
 			return content;
 		} catch (error) {
 			console.error('Error fetching content:', error);
