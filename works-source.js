@@ -351,10 +351,10 @@ async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portR
 		log(`connected to ${address}:${port}`);
 		//if (/^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?).){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(address)) address = `${atob('d3d3Lg==')}${address}${atob('LmlwLjA5MDIyNy54eXo=')}`;
 
-		/*
+		// 注释整段google DNS解析功能，开通使用 /*
 		// 通过将address变量的域名值事先解析成IPv4地址，这样在下面的connect阶段将通过IPv4地址建立TCP会话，从而避免通过IPv6连接
-		//if (address.includes('fast.com') || address.includes('netflix.com') || address.includes('netflix.net') || address.includes('nflxext.com') || address.includes('nflxso.net') || address.includes('nflxvideo.net') || address.includes('nflxsearch.net') || address.includes('nflximg.com')) {
-		if (address.includes('163.com')) {
+		if (address.includes('fast.com') || address.includes('netflix.com') || address.includes('netflix.net') || address.includes('nflxext.com') || address.includes('nflxso.net') || address.includes('nflxvideo.net') || address.includes('nflxsearch.net') || address.includes('nflximg.com')) {
+		//if (address.includes('163.com')) {
 			// 解析域名为 IPv4 地址
 			address = await resolveDomainToIPv4(address);
 			}
@@ -393,7 +393,8 @@ async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portR
 					return null;
 				}
 			}
-		*/	
+		
+		// 注释整段google DNS解析功能，结尾使用 */	
                        
         // 如果指定使用 SOCKS5 代理，则通过 SOCKS5 协议连接；否则直接连接
 		const tcpSocket = socks ? await socks5Connect(addressType, address, port, log)
