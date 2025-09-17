@@ -24,11 +24,11 @@ jobs:
           node-version: '20'
 
       # -------------------------------
-      # 3. 安装依赖
+      # 3. 安装依赖（改用 npm install 避免 ci 报错）
       # -------------------------------
       - name: Install dependencies
         run: |
-          npm ci
+          npm install
           npm install --save-dev @babel/core @babel/cli babel-plugin-minify-mangle-names javascript-obfuscator
 
       # -------------------------------
