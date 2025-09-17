@@ -1,4 +1,4 @@
-name: Build & AST Obfuscate Worker with Statement Randomization
+name: Build & AST Obfuscate Worker (Single File)
 
 on:
   push:
@@ -31,35 +31,29 @@ jobs:
           npm install -g @babel/core @babel/cli babel-plugin-minify-mangle-names javascript-obfuscator
 
       # -------------------------------
-      # 4. AST 重写 + 语句随机化（临时输出）
+      # 4. AST 重写 + 语句随机化（单文件）
       # -------------------------------
       - name: AST Transform & Statement Randomization
         run: |
           mkdir -p temp
-
-          # 使用 Babel 对 src/ 目录进行 AST 重写 + 随机化局部变量名
-          # babel-randomize-statements.js 是自定义插件，用于打乱可交换语句顺序
-          babel src/ --out-dir temp/ \
+          babel works-source.js --out-file temp/works-source.js \
             --plugins babel-plugin-minify-mangle-names,./scripts/babel-randomize-statements.js
 
       # -------------------------------
       # 5. 轻量混淆 & 随机全局变量前缀
-      #    并输出到源代码同目录
+      #    输出到源文件同目录
       # -------------------------------
       - name: Obfuscate Worker code
         run: |
           PREFIX="var_$(date +%s%N | sha256sum | head -c 6)"
           echo "Using prefix: $PREFIX"
 
-          for file in temp/*.js; do
-            BASENAME=$(basename "$file" .js)
-            javascript-obfuscator "$file" \
-              --output "src/${BASENAME}_obfuscated.js" \
-              --compact true \
-              --control-flow-flattening false \
-              --string-array true \
-              --string-array-encoding rc4 \
-              --rename-globals true \
-              --identifier-names-generator mangled \
-              --identifier-prefix $PREFIX
-          done
+          javascript-obfuscator temp/works-source.js \
+            --output works-source_obfuscated.js \
+            --compact true \
+            --control-flow-flattening false \
+            --string-array true \
+            --string-array-encoding rc4 \
+            --rename-globals true \
+            --identifier-names-generator mangled \
+            --identifier-prefix $PREFIX
