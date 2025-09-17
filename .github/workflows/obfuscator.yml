@@ -3,7 +3,7 @@ name: Build & AST Obfuscate Worker
 on:
   push:
     branches:
-      - main
+      - main  # 仅在 main 分支 push 时触发
 
 jobs:
   build:
@@ -28,32 +28,39 @@ jobs:
       # -------------------------------
       - name: Install dependencies
         run: |
-          npm install --save-dev @babel/core @babel/cli @babel/preset-env javascript-obfuscator
+          npm install
+          npm install --save-dev @babel/core @babel/cli babel-plugin-minify-mangle-names javascript-obfuscator
 
       # -------------------------------
-      # 4. AST Transform（去掉 babel-plugin-minify-mangle-names）
+      # 4. AST Transform（仅变量名混淆）
       # -------------------------------
       - name: AST Transform
         run: |
           mkdir -p temp
-          npx babel works-source.js \
-            --out-file temp/works-source.js \
-            --presets @babel/preset-env
+          for file in src/*.js; do
+            BASENAME=$(basename "$file")
+            npx babel "$file" \
+              --out-file "temp/$BASENAME" \
+              --plugins babel-plugin-minify-mangle-names
+          done
 
       # -------------------------------
-      # 5. JavaScript Obfuscation
+      # 5. JavaScript 混淆
       # -------------------------------
       - name: Obfuscate Worker code
         run: |
           PREFIX="var_$(date +%s%N | sha256sum | head -c 6)"
           echo "Using prefix: $PREFIX"
 
-          npx javascript-obfuscator temp/works-source.js \
-            --output works-source_obfuscated.js \
-            --compact true \
-            --control-flow-flattening false \
-            --string-array true \
-            --string-array-encoding rc4 \
-            --rename-globals true \
-            --identifier-names-generator mangled \
-            --identifier-prefix $PREFIX
+          for file in temp/*.js; do
+            BASENAME=$(basename "$file" .js)
+            npx javascript-obfuscator "$file" \
+              --output "src/${BASENAME}_obfuscated.js" \
+              --compact true \
+              --control-flow-flattening false \
+              --string-array true \
+              --string-array-encoding rc4 \
+              --rename-globals true \
+              --identifiers-prefix $PREFIX \
+              --identifier-names-generator mangled
+          done
