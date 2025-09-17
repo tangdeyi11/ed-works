@@ -117,9 +117,9 @@ export default {
 					await sendMessage(`#获取订阅 ${FileName}`, request.headers.get('CF-Connecting-IP'), `UA: ${UA}</tg-spoiler>\n域名: ${url.hostname}\n<tg-spoiler>入口: ${url.pathname + url.search}</tg-spoiler>`);
 					if ((!sub || sub == '') && (addresses.length + addressesapi.length + addressesnotls.length + addressesnotlsapi.length + addressescsv.length) == 0){
 						if (request.headers.get('Host').includes(".workers.dev")) {
-							sub = 'dy.dtcs520.filegear-sg.me'; 
+							sub = 'end.dtcs520.com'; 
 							subconfig = 'https://raw.githubusercontent.com/tangdeyi11/dyconfig/main/rule.ini';
-						} else sub = 'dy.dtcs520.filegear-sg.me';
+						} else sub = 'end.dtcs520.com';
 					} 
 					const vlessConfig = await getVLESSConfig(userID, request.headers.get('Host'), sub, UA, RproxyIP, url);
 					const now = Date.now();
@@ -175,11 +175,11 @@ export default {
 				proxyIP = url.searchParams.get('proxyip') || proxyIP;
 				if (new RegExp('/proxyip=', 'i').test(url.pathname)) proxyIP = url.pathname.toLowerCase().split('/proxyip=')[1];
 				else if (new RegExp('/proxyip.', 'i').test(url.pathname)) proxyIP = `proxyip.${url.pathname.toLowerCase().split("/proxyip.")[1]}`;
-				else if (new RegExp('proxy.dtcs520.filegear-sg.me', 'i').test(url.pathname)) proxyIP = 'proxy.dtcs520.filegear-sg.me';
-				else if (new RegExp('proxy-hk.dtcs520.filegear-sg.me', 'i').test(url.pathname)) proxyIP = 'proxy-hk.dtcs520.filegear-sg.me';
-				else if (new RegExp('proxy-jp.dtcs520.filegear-sg.me', 'i').test(url.pathname)) proxyIP = 'proxy-jp.dtcs520.filegear-sg.me';
-				else if (new RegExp('proxy-us.dtcs520.filegear-sg.me', 'i').test(url.pathname)) proxyIP = 'proxy-us.dtcs520.filegear-sg.me';
-				else if (!proxyIP || proxyIP == '') proxyIP = 'proxy.dtcs520.filegear-sg.me';
+				else if (new RegExp('sg.dtcs520.com', 'i').test(url.pathname)) proxyIP = 'sg.dtcs520.com';
+				else if (new RegExp('hk.dtcs520.com', 'i').test(url.pathname)) proxyIP = 'hk.dtcs520.com';
+				else if (new RegExp('jp.dtcs520.com', 'i').test(url.pathname)) proxyIP = 'jp.dtcs520.com';
+				else if (new RegExp('us.dtcs520.com', 'i').test(url.pathname)) proxyIP = 'us.dtcs520.com';
+				else if (!proxyIP || proxyIP == '') proxyIP = 'sg.dtcs520.com';
 				
 				
 				socks5Address = url.searchParams.get('socks5') || socks5Address;
@@ -1355,7 +1355,7 @@ https://github.com/cmliu/edgetunnel
 			fakeHostName = `${fakeHostName}.xyz`
 		}
 
-		let url = `https://${sub}/sub?host=${fakeHostName}&uuid=${fakeUserID}&edgetunnel=cmliu&proxyip=${RproxyIP}`; //到订阅服务器获取各节点vless配置。https:// dy.tangdeyi11.workers.dev/sub?host=vpn.dtcs520.filegear-sg.me&uuid=c4570b83-63ca-4995-a195-1eed059a8297
+		let url = `https://${sub}/sub?host=${fakeHostName}&uuid=${fakeUserID}&edgetunnel=cmliu&proxyip=${RproxyIP}`; //到订阅服务器获取各节点vless配置。
 		let isBase64 = true;
 
 		if (!sub || sub == ""){
