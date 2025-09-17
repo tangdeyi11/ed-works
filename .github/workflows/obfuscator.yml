@@ -1,4 +1,4 @@
-name: Build & AST Obfuscate Worker (Single File)
+name: Build & AST Obfuscate Worker
 
 on:
   push:
@@ -24,12 +24,12 @@ jobs:
           node-version: '20'
 
       # -------------------------------
-      # 3. 临时安装 Babel CLI & 插件到 .babel_tmp
+      # 3. 临时安装 Babel CLI & 插件到 babel_tmp
       # -------------------------------
       - name: Install Babel CLI & plugin locally
         run: |
-          mkdir -p .babel_tmp
-          cd .babel_tmp
+          mkdir -p babel_tmp
+          cd babel_tmp
           npm init -y
           npm install @babel/cli babel-plugin-minify-mangle-names
 
@@ -44,8 +44,14 @@ jobs:
       # -------------------------------
       - name: AST Transform & Statement Randomization
         run: |
+          # 确认文件存在
+          if [ ! -f works-source.js ]; then
+            echo "Error: works-source.js not found!"
+            exit 1
+          fi
+
           npx babel works-source.js --out-file temp/works-source.js \
-            --plugins ./.babel_tmp/node_modules/babel-plugin-minify-mangle-names,./scripts/babel-randomize-statements.js \
+            --plugins ./babel_tmp/node_modules/babel-plugin-minify-mangle-names,./scripts/babel-randomize-statements.js \
             --verbose
 
       # -------------------------------
