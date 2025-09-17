@@ -1,13 +1,15 @@
-name: Build & Obfuscate Worker
+name: Obfuscate Worker code
 
 on:
   push:
     branches:
       - main
+    paths:
+      - 'works-source.js'
   workflow_dispatch:
 
 jobs:
-  build:
+  obfuscate:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -29,41 +31,33 @@ jobs:
           node-version: '20'
 
       # -------------------------------
-      # 3. 安装依赖
+      # 3. 安装 javascript-obfuscator
       # -------------------------------
-      - name: Install dependencies
-        run: |
-          npm install --save-dev @babel/core @babel/cli @babel/preset-env javascript-obfuscator
+      - name: Install Obfuscator
+        run: npm install -g javascript-obfuscator
 
       # -------------------------------
-      # 4. AST Transform
+      # 4. Obfuscate JS
       # -------------------------------
-      - name: AST Transform
-        run: |
-          npx babel works-source.js \
-            --out-file works-source.transformed.js \
-            --presets @babel/preset-env
-
-      # -------------------------------
-      # 5. JavaScript Obfuscation
-      # -------------------------------
-      - name: Obfuscate Worker code
+      - name: Obfuscate works-source.js
         run: |
           PREFIX="var_$(date +%s%N | sha256sum | head -c 6)"
           echo "Using prefix: $PREFIX"
 
-          npx javascript-obfuscator works-source.transformed.js \
+          javascript-obfuscator works-source.js \
             --output works-source_obfuscated.js \
             --compact true \
             --control-flow-flattening false \
+            --dead-code-injection false \
             --string-array true \
-            --string-array-encoding rc4 \
+            --string-array-encoding base64 \
+            --string-array-threshold 0.5 \
             --rename-globals true \
             --identifier-names-generator mangled \
             --identifiers-prefix $PREFIX
 
       # -------------------------------
-      # 6. Commit & Push 混淆文件
+      # 5. Commit & Push
       # -------------------------------
       - name: Commit changes
         run: |
@@ -73,7 +67,4 @@ jobs:
           git commit -m "Obfuscate works-source_obfuscated.js" || echo "No changes to commit"
 
       - name: Push changes
-        uses: ad-m/github-push-action@master
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          branch: ${{ github.ref }}
+        run: git push origin main
