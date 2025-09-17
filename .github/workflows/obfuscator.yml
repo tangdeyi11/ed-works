@@ -3,7 +3,7 @@ name: Build & AST Obfuscate Worker
 on:
   push:
     branches:
-      - main  # 仅在 main 分支 push 时触发
+      - main
 
 jobs:
   build:
@@ -28,20 +28,20 @@ jobs:
       # -------------------------------
       - name: Install dependencies
         run: |
-          npm install --save-dev @babel/core @babel/cli javascript-obfuscator
+          npm install --save-dev @babel/core @babel/cli @babel/preset-env javascript-obfuscator
 
       # -------------------------------
-      # 4. AST 重写（临时输出，去掉语句随机化）
+      # 4. AST Transform（去掉 babel-plugin-minify-mangle-names）
       # -------------------------------
       - name: AST Transform
         run: |
           mkdir -p temp
           npx babel works-source.js \
             --out-file temp/works-source.js \
-            --plugins babel-plugin-minify-mangle-names
+            --presets @babel/preset-env
 
       # -------------------------------
-      # 5. 轻量混淆 & 随机全局变量前缀
+      # 5. JavaScript Obfuscation
       # -------------------------------
       - name: Obfuscate Worker code
         run: |
