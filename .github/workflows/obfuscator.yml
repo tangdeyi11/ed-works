@@ -1,56 +1,66 @@
-name: Obfuscate and Commit
+name: Build & AST Obfuscate Worker with Statement Randomization
 
 on:
-    push:
-        paths:
-            - 'works-source.js'
-    workflow_dispatch:
+  push:
+    branches:
+      - main  # 仅在 main 分支 push 时触发
 
 jobs:
-  obfuscate:
+  build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
+      # -------------------------------
+      # 1. 拉取源码
+      # -------------------------------
       - uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
 
-      - name: Use Node.js
+      # -------------------------------
+      # 2. 安装 Node.js
+      # -------------------------------
+      - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: "16"
+          node-version: '20'
 
+      # -------------------------------
+      # 3. 安装依赖
+      # -------------------------------
       - name: Install dependencies
-        run: npm install -g javascript-obfuscator
+        run: |
+          npm ci
+          npm install --save-dev @babel/core @babel/cli babel-plugin-minify-mangle-names javascript-obfuscator
 
-      - name: Obfuscate code
+      # -------------------------------
+      # 4. AST 重写 + 语句随机化（临时输出）
+      # -------------------------------
+      - name: AST Transform & Statement Randomization
         run: |
-          javascript-obfuscator works-source.js --output works-obfuscator.js \
-          --compact true \
-          --control-flow-flattening true \
-          --control-flow-flattening-threshold 0.75 \
-          --dead-code-injection true \
-          --dead-code-injection-threshold 0.6 \
-          --identifier-names-generator mangled \
-          --rename-globals true \
-          --string-array true \
-          --string-array-encoding 'base64,rc4' \
-          --string-array-threshold 0.75 \
-          --transform-object-keys true \
-          --unicode-escape-sequence true \
-          --split-strings true \
-          --split-strings-chunk-length 3
-          
-      - name: Commit changes
+          mkdir -p temp
+
+          # 使用 Babel 对 src/ 目录进行 AST 重写 + 随机化局部变量名
+          # babel-randomize-statements.js 是自定义插件，用于打乱可交换语句顺序
+          npx babel src/ --out-dir temp/ \
+            --plugins babel-plugin-minify-mangle-names,./scripts/babel-randomize-statements.js
+
+      # -------------------------------
+      # 5. 轻量混淆 & 随机全局变量前缀
+      #    并输出到源代码同目录
+      # -------------------------------
+      - name: Obfuscate Worker code
         run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add works-obfuscator.js
-          git commit -m "Obfuscate works-obfuscator.js" || echo "No changes to commit"
-      - name: Push changes
-        uses: ad-m/github-push-action@master
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          branch: ${{ github.ref }}
+          PREFIX="var_$(date +%s%N | sha256sum | head -c 6)"
+          echo "Using prefix: $PREFIX"
+
+          for file in temp/*.js; do
+            BASENAME=$(basename "$file" .js)
+            npx javascript-obfuscator "$file" \
+              --output "src/${BASENAME}_obfuscated.js" \
+              --compact true \
+              --control-flow-flattening false \
+              --string-array true \
+              --string-array-encoding rc4 \
+              --rename-globals true \
+              --identifier-names-generator mangled \
+              --identifier-prefix $PREFIX
+          done
