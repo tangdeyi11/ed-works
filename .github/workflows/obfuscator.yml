@@ -4,19 +4,21 @@ on:
   push:
     branches:
       - main
-    paths:
-      - 'works-source.js'
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       # -------------------------------
       # 1. 拉取源码
       # -------------------------------
       - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
 
       # -------------------------------
       # 2. 安装 Node.js
@@ -34,7 +36,7 @@ jobs:
           npm install --save-dev @babel/core @babel/cli @babel/preset-env javascript-obfuscator
 
       # -------------------------------
-      # 4. AST Transform（可选）
+      # 4. AST Transform
       # -------------------------------
       - name: AST Transform
         run: |
@@ -61,14 +63,14 @@ jobs:
             --identifiers-prefix $PREFIX
 
       # -------------------------------
-      # 6. 可选：提交混淆文件到仓库
+      # 6. Commit & Push 混淆文件
       # -------------------------------
-      - name: Commit Obfuscated File
+      - name: Commit changes
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add works-source_obfuscated.js
-          git commit -m "Add obfuscated works-source.js" || echo "No changes to commit"
+          git commit -m "Obfuscate works-source_obfuscated.js" || echo "No changes to commit"
 
       - name: Push changes
         uses: ad-m/github-push-action@master
