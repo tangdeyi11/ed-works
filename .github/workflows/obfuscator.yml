@@ -1,63 +1,76 @@
-name: Build & AST Obfuscate Worker
+name: Obfuscate and Commit
 
 on:
   push:
-    branches:
-      - main  # 仅在 main 分支 push 时触发
+    paths:
+      - 'works-source.js'
+  workflow_dispatch:
 
 jobs:
-  build:
+  obfuscate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       # -------------------------------
       # 1. 拉取源码
       # -------------------------------
       - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
 
       # -------------------------------
-      # 2. 安装 Node.js
+      # 2. 使用 Node.js
       # -------------------------------
-      - name: Setup Node.js
+      - name: Use Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '20'
+          node-version: "20"
 
       # -------------------------------
-      # 3. 创建临时 package.json 并安装依赖
+      # 3. 安装依赖
       # -------------------------------
-      - name: Setup temporary Node environment
-        run: |
-          mkdir -p .temp_node
-          cd .temp_node
-          echo '{}' > package.json
-          npm install @babel/core @babel/cli javascript-obfuscator babel-plugin-minify-mangle-names
+      - name: Install dependencies
+        run: npm install -g javascript-obfuscator
 
       # -------------------------------
-      # 4. AST Transform
+      # 4. 混淆源文件生成新文件
       # -------------------------------
-      - name: AST Transform
-        run: |
-          mkdir -p temp
-          npx babel ../works-source.js --out-file temp/works-source.js \
-            --plugins @babel/plugin-transform-modules-commonjs,babel-plugin-minify-mangle-names
-        working-directory: .temp_node
-
-      # -------------------------------
-      # 5. 混淆代码
-      # -------------------------------
-      - name: Obfuscate Worker code
+      - name: Obfuscate code
         run: |
           PREFIX="var_$(date +%s%N | sha256sum | head -c 6)"
           echo "Using prefix: $PREFIX"
 
-          mkdir -p dist
-          npx javascript-obfuscator temp/works-source.js \
-            --output dist/works-obfuscated.js \
+          javascript-obfuscator works-source.js --output works-source_obfuscated.js \
             --compact true \
-            --control-flow-flattening false \
-            --string-array true \
-            --string-array-encoding rc4 \
+            --control-flow-flattening true \
+            --control-flow-flattening-threshold 0.75 \
+            --dead-code-injection true \
+            --dead-code-injection-threshold 0.6 \
+            --identifier-names-generator mangled \
+            --identifiers-prefix $PREFIX \
             --rename-globals true \
-            --identifiers-prefix $PREFIX
-        working-directory: .temp_node
+            --string-array true \
+            --string-array-encoding 'base64,rc4' \
+            --string-array-threshold 0.75 \
+            --transform-object-keys true \
+            --unicode-escape-sequence true \
+            --split-strings true \
+            --split-strings-chunk-length 3
+
+      # -------------------------------
+      # 5. 提交混淆文件
+      # -------------------------------
+      - name: Commit changes
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add works-source_obfuscated.js
+          git commit -m "Obfuscate works-source_obfuscated.js" || echo "No changes to commit"
+
+      - name: Push changes
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ github.ref }}
