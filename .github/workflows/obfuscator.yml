@@ -3,7 +3,7 @@ name: Build & AST Obfuscate Worker (Single File)
 on:
   push:
     branches:
-      - main  # 仅在 main 分支 push 时触发
+      - main
 
 jobs:
   build:
@@ -24,23 +24,32 @@ jobs:
           node-version: '20'
 
       # -------------------------------
-      # 3. 全局安装依赖（不依赖 package.json）
+      # 3. 临时安装 Babel CLI & 插件到 .babel_tmp
       # -------------------------------
-      - name: Install dependencies globally
+      - name: Install Babel CLI & plugin locally
         run: |
-          npm install -g @babel/core @babel/cli babel-plugin-minify-mangle-names javascript-obfuscator
+          mkdir -p .babel_tmp
+          cd .babel_tmp
+          npm init -y
+          npm install @babel/cli babel-plugin-minify-mangle-names
 
       # -------------------------------
-      # 4. AST 重写 + 语句随机化（单文件）
+      # 4. 创建输出目录
+      # -------------------------------
+      - name: Create temp directory
+        run: mkdir -p temp
+
+      # -------------------------------
+      # 5. AST 重写 + 语句随机化（单文件）
       # -------------------------------
       - name: AST Transform & Statement Randomization
         run: |
-          mkdir -p temp
-          babel works-source.js --out-file temp/works-source.js \
-            --plugins babel-plugin-minify-mangle-names,./scripts/babel-randomize-statements.js
+          npx babel works-source.js --out-file temp/works-source.js \
+            --plugins ./.babel_tmp/node_modules/babel-plugin-minify-mangle-names,./scripts/babel-randomize-statements.js \
+            --verbose
 
       # -------------------------------
-      # 5. 轻量混淆 & 随机全局变量前缀
+      # 6. 轻量混淆 & 随机全局变量前缀
       #    输出到源文件同目录
       # -------------------------------
       - name: Obfuscate Worker code
@@ -48,7 +57,7 @@ jobs:
           PREFIX="var_$(date +%s%N | sha256sum | head -c 6)"
           echo "Using prefix: $PREFIX"
 
-          javascript-obfuscator temp/works-source.js \
+          npx javascript-obfuscator temp/works-source.js \
             --output works-source_obfuscated.js \
             --compact true \
             --control-flow-flattening false \
