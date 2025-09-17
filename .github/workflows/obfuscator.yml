@@ -24,23 +24,21 @@ jobs:
           node-version: '20'
 
       # -------------------------------
-      # 3. 临时安装 Babel CLI & 插件到 babel_tmp
+      # 3. 安装依赖 (Babel 7 + Obfuscator)
       # -------------------------------
-      - name: Install Babel CLI & plugin locally
+      - name: Install dependencies
         run: |
-          mkdir -p babel_tmp
-          cd babel_tmp
           npm init -y
-          npm install @babel/cli babel-plugin-minify-mangle-names
+          npm install --save-dev @babel/core @babel/cli babel-plugin-minify-mangle-names javascript-obfuscator
 
       # -------------------------------
-      # 4. 创建输出目录
+      # 4. 创建临时输出目录
       # -------------------------------
       - name: Create temp directory
         run: mkdir -p temp
 
       # -------------------------------
-      # 5. AST 重写 + 语句随机化（单文件）
+      # 5. AST 重写 + 语句随机化
       # -------------------------------
       - name: AST Transform & Statement Randomization
         run: |
@@ -50,13 +48,14 @@ jobs:
             exit 1
           fi
 
-          npx babel works-source.js --out-file temp/works-source.js \
-            --plugins ./babel_tmp/node_modules/babel-plugin-minify-mangle-names,./scripts/babel-randomize-statements.js \
+          # Babel AST 重写 + 语句随机化
+          npx babel works-source.js \
+            --out-file temp/works-source.js \
+            --plugins babel-plugin-minify-mangle-names,./scripts/babel-randomize-statements.js \
             --verbose
 
       # -------------------------------
-      # 6. 轻量混淆 & 随机全局变量前缀
-      #    输出到源文件同目录
+      # 6. 轻量混淆 & 字符串隐藏 + 全局变量随机前缀
       # -------------------------------
       - name: Obfuscate Worker code
         run: |
