@@ -24,43 +24,40 @@ jobs:
           node-version: '20'
 
       # -------------------------------
-      # 3. 安装依赖
+      # 3. 创建临时 package.json 并安装依赖
       # -------------------------------
-      - name: Install dependencies
+      - name: Setup temporary Node environment
         run: |
-          npm install
-          npm install --save-dev @babel/core @babel/cli babel-plugin-minify-mangle-names javascript-obfuscator
+          mkdir -p .temp_node
+          cd .temp_node
+          echo '{}' > package.json
+          npm install @babel/core @babel/cli javascript-obfuscator babel-plugin-minify-mangle-names
 
       # -------------------------------
-      # 4. AST Transform（仅变量名混淆）
+      # 4. AST Transform
       # -------------------------------
       - name: AST Transform
         run: |
           mkdir -p temp
-          for file in src/*.js; do
-            BASENAME=$(basename "$file")
-            npx babel "$file" \
-              --out-file "temp/$BASENAME" \
-              --plugins babel-plugin-minify-mangle-names
-          done
+          npx babel ../works-source.js --out-file temp/works-source.js \
+            --plugins @babel/plugin-transform-modules-commonjs,babel-plugin-minify-mangle-names
+        working-directory: .temp_node
 
       # -------------------------------
-      # 5. JavaScript 混淆
+      # 5. 混淆代码
       # -------------------------------
       - name: Obfuscate Worker code
         run: |
           PREFIX="var_$(date +%s%N | sha256sum | head -c 6)"
           echo "Using prefix: $PREFIX"
 
-          for file in temp/*.js; do
-            BASENAME=$(basename "$file" .js)
-            npx javascript-obfuscator "$file" \
-              --output "src/${BASENAME}_obfuscated.js" \
-              --compact true \
-              --control-flow-flattening false \
-              --string-array true \
-              --string-array-encoding rc4 \
-              --rename-globals true \
-              --identifiers-prefix $PREFIX \
-              --identifier-names-generator mangled
-          done
+          mkdir -p dist
+          npx javascript-obfuscator temp/works-source.js \
+            --output dist/works-obfuscated.js \
+            --compact true \
+            --control-flow-flattening false \
+            --string-array true \
+            --string-array-encoding rc4 \
+            --rename-globals true \
+            --identifiers-prefix $PREFIX
+        working-directory: .temp_node
