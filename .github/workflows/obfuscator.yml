@@ -1,4 +1,4 @@
-name: Obfuscate Worker code
+name: Obfuscate Worker JS Advanced
 
 on:
   push:
@@ -15,30 +15,22 @@ jobs:
       contents: write
 
     steps:
-      # -------------------------------
       # 1. 拉取源码
-      # -------------------------------
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
-      # -------------------------------
       # 2. 安装 Node.js
-      # -------------------------------
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
           node-version: '20'
 
-      # -------------------------------
       # 3. 安装 javascript-obfuscator
-      # -------------------------------
       - name: Install Obfuscator
         run: npm install -g javascript-obfuscator
 
-      # -------------------------------
-      # 4. Obfuscate JS（不平坦化）
-      # -------------------------------
+      # 4. 混淆 JS
       - name: Obfuscate works-source.js
         run: |
           PREFIX="var_$(date +%s%N | sha256sum | head -c 6)"
@@ -50,15 +42,18 @@ jobs:
             --control-flow-flattening false \
             --dead-code-injection false \
             --string-array true \
-            --string-array-encoding rc4 \
-            --string-array-threshold 0.5 \
+            --string-array-encoding 'base64,rc4' \
+            --string-array-threshold 0.7 \
             --rename-globals true \
             --identifier-names-generator mangled \
-            --identifiers-prefix $PREFIX
+            --identifiers-prefix $PREFIX \
+            --self-defending true \
+            --transform-object-keys true \
+            --unicode-escape-sequence true \
+            --split-strings true \
+            --split-strings-chunk-length 3
 
-      # -------------------------------
-      # 5. Commit & Push
-      # -------------------------------
+      # 5. 提交 & 推送混淆文件
       - name: Commit changes
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
