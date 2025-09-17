@@ -31,17 +31,16 @@ jobs:
           node-version: '20'
 
       # -------------------------------
-      # 3. 安装 javascript-obfuscator 指定版本
+      # 3. 安装 javascript-obfuscator
       # -------------------------------
       - name: Install Obfuscator
-        run: npm install -g javascript-obfuscator@7.0.0
+        run: npm install -g javascript-obfuscator
 
       # -------------------------------
-      # 4. Obfuscate JS (不覆盖原文件)
+      # 4. Obfuscate JS（不平坦化）
       # -------------------------------
       - name: Obfuscate works-source.js
         run: |
-          rm -f works-source_obfuscated.js
           PREFIX="var_$(date +%s%N | sha256sum | head -c 6)"
           echo "Using prefix: $PREFIX"
 
@@ -58,7 +57,7 @@ jobs:
             --identifiers-prefix $PREFIX
 
       # -------------------------------
-      # 5. Commit & Push 新文件
+      # 5. Commit & Push
       # -------------------------------
       - name: Commit changes
         run: |
