@@ -37,22 +37,21 @@ jobs:
           echo "Using prefix: $PREFIX"
 
           javascript-obfuscator works-source.js \
-              --output works-source_obfuscated.js \
-              --compact true \
-              --control-flow-flattening true \
-              --control-flow-flattening-threshold 0.25 \
-              --dead-code-injection false \
-              --string-array true \
-              --string-array-encoding 'rc4' \
-              --string-array-threshold 0.7 \
-              --rename-globals true \
-              --identifier-names-generator hexadecimal \
-              --identifiers-prefix $PREFIX \
-              --self-defending false \
-              --transform-object-keys true \
-              --unicode-escape-sequence true \
-              --split-strings false
-
+            --output works-source_obfuscated.js \
+            --compact true \
+            --control-flow-flattening false \
+            --dead-code-injection false \
+            --string-array true \
+            --string-array-encoding 'base64,rc4' \
+            --string-array-threshold 0.7 \
+            --rename-globals true \
+            --identifier-names-generator mangled \
+            --identifiers-prefix $PREFIX \
+            --self-defending false \
+            --transform-object-keys true \
+            --unicode-escape-sequence true \
+            --split-strings true \
+            --split-strings-chunk-length 3
 
       # 5. 提交 & 推送混淆文件
       - name: Commit changes
