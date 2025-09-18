@@ -31,11 +31,12 @@ jobs:
           --compact true \
           --control-flow-flattening true \
           --control-flow-flattening-threshold 0.75 \
-          --dead-code-injection true \
+          --dead-code-injection false \
           --identifier-names-generator mangled \
           --rename-globals true \
           --string-array true \
           --string-array-encoding 'base64,rc4' \
+          --identifiers-prefix $PREFIX \
           --string-array-threshold 0.75 \
           --transform-object-keys true \
           --unicode-escape-sequence true \
