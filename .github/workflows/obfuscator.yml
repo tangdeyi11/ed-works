@@ -33,7 +33,7 @@ jobs:
       # 4. 混淆 JS
       - name: Obfuscate works-source.js
         run: |
-          javascript-obfuscator index.js --output _worker.js \
+          javascript-obfuscator works-source.js --output _worker.js \
           --compact true \
           --control-flow-flattening true \
           --control-flow-flattening-threshold 1 \
