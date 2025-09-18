@@ -33,25 +33,19 @@ jobs:
       # 4. 混淆 JS
       - name: Obfuscate works-source.js
         run: |
-          PREFIX="var_$(date +%s%N | sha256sum | head -c 6)"
-          echo "Using prefix: $PREFIX"
-
-          javascript-obfuscator works-source.js \
-            --output works-source_obfuscated.js \
-            --compact true \
-            --control-flow-flattening false \
-            --dead-code-injection false \
-            --string-array true \
-            --string-array-encoding 'base64,rc4' \
-            --string-array-threshold 0.7 \
-            --rename-globals true \
-            --identifier-names-generator mangled \
-            --identifiers-prefix $PREFIX \
-            --self-defending true \
-            --transform-object-keys true \
-            --unicode-escape-sequence true \
-            --split-strings true \
-            --split-strings-chunk-length 3
+          javascript-obfuscator index.js --output _worker.js \
+          --compact true \
+          --control-flow-flattening true \
+          --control-flow-flattening-threshold 1 \
+          --dead-code-injection true \
+          --dead-code-injection-threshold 1 \
+          --identifier-names-generator hexadecimal \
+          --rename-globals true \
+          --string-array true \
+          --string-array-encoding 'rc4' \
+          --string-array-threshold 1 \
+          --transform-object-keys true \
+          --unicode-escape-sequence true
 
       # 5. 提交 & 推送混淆文件
       - name: Commit changes
