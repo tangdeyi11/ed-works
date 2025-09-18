@@ -30,7 +30,7 @@ jobs:
           javascript-obfuscator works-source.js --output works-obfuscator.js \
           --compact true \
           --control-flow-flattening true \
-          --control-flow-flattening-threshold 0.75 \
+          --control-flow-flattening-threshold 0.5 \
           --dead-code-injection true \
           --dead-code-injection-threshold 0.1 \
           --identifier-names-generator mangled \
