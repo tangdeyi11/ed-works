@@ -37,7 +37,7 @@ jobs:
           echo "Using prefix: $PREFIX"
 
           javascript-obfuscator works-source.js \
-            --output works-source_obfuscated.js \
+            --output _worker.js \
             --compact true \
             --control-flow-flattening false \
             --dead-code-injection false \
