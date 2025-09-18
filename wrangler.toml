@@ -1,4 +1,0 @@
-name = "v20250917"
-main = "works-source_obfuscated.js"
-compatibility_date = "2025-09-17"
-keep_vars = true
