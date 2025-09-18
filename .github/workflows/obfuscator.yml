@@ -1,9 +1,10 @@
 name: Obfuscate and Commit
 
 on:
-  push:
-    branches: [main]
-  workflow_dispatch:
+    push:
+        paths:
+            - 'works-source.js'
+    workflow_dispatch:
 
 jobs:
   obfuscate:
@@ -29,24 +30,25 @@ jobs:
           javascript-obfuscator works-source.js --output _worker.js \
           --compact true \
           --control-flow-flattening true \
-          --control-flow-flattening-threshold 1 \
+          --control-flow-flattening-threshold 0.75 \
           --dead-code-injection true \
-          --dead-code-injection-threshold 1 \
-          --identifier-names-generator hexadecimal \
+          --dead-code-injection-threshold 0.6 \
+          --identifier-names-generator mangled \
           --rename-globals true \
           --string-array true \
-          --string-array-encoding 'rc4' \
-          --string-array-threshold 1 \
+          --string-array-encoding 'base64,rc4' \
+          --string-array-threshold 0.75 \
           --transform-object-keys true \
-          --unicode-escape-sequence true
-
+          --unicode-escape-sequence true \
+          --split-strings true \
+          --split-strings-chunk-length 3
+          
       - name: Commit changes
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add _worker.js
-          git commit -m "Obfuscate _worker.js" || echo "No changes to commit"
-
+          git add works-obfuscator.js
+          git commit -m "Obfuscate works-obfuscator.js" || echo "No changes to commit"
       - name: Push changes
         uses: ad-m/github-push-action@master
         with:
