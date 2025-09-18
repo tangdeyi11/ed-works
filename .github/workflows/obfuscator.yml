@@ -1,10 +1,12 @@
-name: Obfuscate and Commit
+name: Obfuscate Worker JS Advanced
 
 on:
-    push:
-        paths:
-            - 'works-source.js'
-    workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'works-source.js'
+  workflow_dispatch:
 
 jobs:
   obfuscate:
@@ -13,44 +15,52 @@ jobs:
       contents: write
 
     steps:
+      # 1. 拉取源码
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
-      - name: Use Node.js
+      # 2. 安装 Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: "16"
+          node-version: '20'
 
-      - name: Install dependencies
+      # 3. 安装 javascript-obfuscator
+      - name: Install Obfuscator
         run: npm install -g javascript-obfuscator
 
-      - name: Obfuscate code
+      # 4. 混淆 JS
+      - name: Obfuscate works-source.js
         run: |
-          javascript-obfuscator works-source.js --output works-obfuscator.js \
-          --compact true \
-          --control-flow-flattening true \
-          --control-flow-flattening-threshold 0.75 \
-          --dead-code-injection false \
-          --identifier-names-generator mangled \
-          --rename-globals true \
-          --string-array true \
-          --string-array-encoding 'base64,rc4' \
-          --identifiers-prefix $PREFIX \
-          --string-array-threshold 0.75 \
-          --transform-object-keys true \
-          --unicode-escape-sequence true \
-          --split-strings true \
-          --split-strings-chunk-length 3
-          
+          PREFIX="var_$(date +%s%N | sha256sum | head -c 6)"
+          echo "Using prefix: $PREFIX"
+
+          javascript-obfuscator works-source.js \
+              --output works-source_obfuscated.js \
+              --compact true \
+              --control-flow-flattening true \
+              --control-flow-flattening-threshold 0.25 \
+              --dead-code-injection false \
+              --string-array true \
+              --string-array-encoding 'rc4' \
+              --string-array-threshold 0.7 \
+              --rename-globals true \
+              --identifier-names-generator hexadecimal \
+              --identifiers-prefix $PREFIX \
+              --self-defending false \
+              --transform-object-keys true \
+              --unicode-escape-sequence true \
+              --split-strings false
+
+
+      # 5. 提交 & 推送混淆文件
       - name: Commit changes
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add works-obfuscator.js
-          git commit -m "Obfuscate works-obfuscator.js" || echo "No changes to commit"
+          git add works-source_obfuscated.js
+          git commit -m "Obfuscate works-source_obfuscated.js" || echo "No changes to commit"
+
       - name: Push changes
-        uses: ad-m/github-push-action@master
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          branch: ${{ github.ref }}
+        run: git push origin main
