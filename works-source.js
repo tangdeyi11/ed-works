@@ -335,113 +335,143 @@ async function vlessOverWSHandler(request) {
  * @param {import("@cloudflare/workers-types").WebSocket} webSocket 用于传递远程 Socket 的 WebSocket
  * @param {Uint8Array} vlessResponseHeader VLESS 响应头部
  * @param {function} log 日志记录函数
- * @returns {Promise<void>} 异步操作的 Promise
+ * @param {boolean} enableSocks 是否启用 SOCKS5
+ * @param {string|null} proxyIP 可选代理 IP
+ * @returns {Promise<void>}
  */
-async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portRemote, rawClientData, webSocket, vlessResponseHeader, log,) {
-	/**
-	 * 连接远程服务器并写入数据
-	 * @param {string} address 要连接的地址
-	 * @param {number} port 要连接的端口
-	 * @param {boolean} socks 是否使用 SOCKS5 代理连接
-	 * @returns {Promise<import("@cloudflare/workers-types").Socket>} 连接后的 TCP Socket
-	 */
+async function handleTCPOutBound(
+  remoteSocket,
+  addressType,
+  addressRemote,
+  portRemote,
+  rawClientData,
+  webSocket,
+  vlessResponseHeader,
+  log,
+  enableSocks = false,
+  proxyIP = null
+) {
+  // -------------------------
+  // DNS 缓存
+  // -------------------------
+  const dnsCache = new Map();
 
-	async function connectAndWrite(address, port, socks = false) {
-		/** @type {import("@cloudflare/workers-types").Socket} */
-		log(`connected to ${address}:${port}`);
-		//if (/^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?).){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(address)) address = `${atob('d3d3Lg==')}${address}${atob('LmlwLjA5MDIyNy54eXo=')}`;
+  async function resolveDomainToIPv4(address) {
+    if (dnsCache.has(address)) return dnsCache.get(address);
+    try {
+      const response = await fetch(`https://dns.google/resolve?name=${address}&type=A`);
+      if (!response.ok) {
+        log(`DNS fetch failed for ${address}: ${response.status}`);
+        return null;
+      }
+      const data = await response.json();
+      const firstIPv4 = data.Answer?.find(r => r.type === 1)?.data || null;
+      if (firstIPv4) dnsCache.set(address, firstIPv4);
+      return firstIPv4;
+    } catch (e) {
+      log(`DNS resolution error for ${address}: ${e}`);
+      return null;
+    }
+  }
 
-		// 注释整段google DNS解析功能，开通使用 /*
-		// 通过将address变量的域名值事先解析成IPv4地址，这样在下面的connect阶段将通过IPv4地址建立TCP会话，从而避免通过IPv6连接
-		//if (address.includes('fast.com') || address.includes('netflix.com') || address.includes('netflix.net') || address.includes('nflxext.com') || address.includes('nflxso.net') || address.includes('nflxvideo.net') || address.includes('nflxsearch.net') || address.includes('nflximg.com')) {
-		if (address.includes('163.com')) {
-			// 解析域名为 IPv4 地址
-			address = await resolveDomainToIPv4(address);
-			}
-		    
-			//通过google的web DNS服务解析IPv4地址
-			async function resolveDomainToIPv4(address) {
-				try {
-					const response = await fetch(`https://dns.google/resolve?name=${address}&type=A`);
-					
-					// 检查响应状态码
-					if (!response.ok) {
-						console.error(`Failed to fetch DNS data: ${response.status} ${response.statusText}`);
-						return null;
-					}
-			
-					const data = await response.json();
-			
-					// 检查 DNS 解析的结果,google的DNS会解析出多个类型的地址，IPv4地址type为1，并且排在后面，需要通过下面代码筛选
-					if (data.Status === 0 && Array.isArray(data.Answer) && data.Answer.length > 0) {
-						// 查找第一个 type 为 1 的条目
-						const firstIPv4Record = data.Answer.find(record => record.type === 1);
-						
-						if (firstIPv4Record) {
-							// 返回第一个 IPv4 地址
-							return firstIPv4Record.data;
-						} else {
-							console.warn(`No valid A record found for ${address}`);
-							return null;
-						}
-					} else {
-						console.warn(`No valid A record found for ${address}`);
-						return null;
-					}
-				} catch (error) {
-					console.error('DNS resolution error:', error);
-					return null;
-				}
-			}
-		
-		// 注释整段google DNS解析功能，结尾使用 */	
-                       
-        // 如果指定使用 SOCKS5 代理，则通过 SOCKS5 协议连接；否则直接连接
-		const tcpSocket = socks ? await socks5Connect(addressType, address, port, log)
-			: connect({
-				hostname: address,
-				port: port,
-			});
-		remoteSocket.value = tcpSocket;
-		//log(`connected to ${address}:${port}`);
-		const writer = tcpSocket.writable.getWriter();
-		// 首次写入，通常是 TLS 客户端 Hello 消息
-		await writer.write(rawClientData);
-		writer.releaseLock();
-		return tcpSocket;
-	}
-    
+  // -------------------------
+  // 连接远程服务器并写入数据
+  // -------------------------
+  async function connectAndWrite(address, port, socks = false) {
+    log(`connecting to ${address}:${port}`);
 
-	/**
-	 * 重试函数：当 Cloudflare 的 TCP Socket 没有传入数据时，我们尝试重定向 IP
-	 * 这可能是因为某些网络问题导致的连接失败
-	 */
-	async function retry() {
-		if (enableSocks) {
-			// 如果启用了 SOCKS5，通过 SOCKS5 代理重试连接
-			tcpSocket = await connectAndWrite(addressRemote, portRemote, true);
-		} else {
-			// 否则，尝试使用预设的代理 IP（如果有）或原始地址重试连接
-			tcpSocket = await connectAndWrite(proxyIP || addressRemote, portRemote);
-		}
-		// 无论重试是否成功，都要关闭 WebSocket（可能是为了重新建立连接）
-		tcpSocket.closed.catch(error => {
-			console.log('retry tcpSocket closed error', error);
-		}).finally(() => {
-			safeCloseWebSocket(webSocket);
-		})
-		// 建立从远程 Socket 到 WebSocket 的数据流
-		remoteSocketToWS(tcpSocket, webSocket, vlessResponseHeader, null, log);
-	}
+    // 特定域名解析成 IPv4
+    //if (address.includes('fast.com') || address.includes('netflix.com') || address.includes('netflix.net') || address.includes('nflxext.com') || address.includes('nflxso.net') || address.includes('nflxvideo.net') || address.includes('nflxsearch.net') || address.includes('nflximg.com')) {
+	if (address.includes('163.com')) {
+      const ipv4 = await resolveDomainToIPv4(address);
+      if (ipv4) address = ipv4;
+      else log(`Warning: DNS did not resolve ${address}, using original`);
+    }
 
-	// 首次尝试连接远程服务器
-	let tcpSocket = await connectAndWrite(addressRemote, portRemote);
+    const tcpSocket = socks
+      ? await socks5Connect(addressType, address, port, log)
+      : await connect({ hostname: address, port });
 
-	// 当远程 Socket 就绪时，将其传递给 WebSocket
-	// 建立从远程服务器到 WebSocket 的数据流，用于将远程服务器的响应发送回客户端
-	// 如果连接失败或无数据，retry 函数将被调用进行重试
-	remoteSocketToWS(tcpSocket, webSocket, vlessResponseHeader, retry, log);
+    remoteSocket.value = tcpSocket;
+
+    // -------------------------
+    // TCP 分块写入，避免 CPU 超时
+    // -------------------------
+    const writer = tcpSocket.writable.getWriter();
+    const CHUNK_SIZE = 32 * 1024; // 32KB 分块
+    for (let i = 0; i < rawClientData.byteLength; i += CHUNK_SIZE) {
+      await writer.write(rawClientData.slice(i, i + CHUNK_SIZE));
+    }
+    writer.releaseLock();
+
+    return tcpSocket;
+  }
+
+  // -------------------------
+  // Retry 机制
+  // -------------------------
+  async function retry() {
+    log('retrying TCP connection...');
+    try {
+      const retryAddress = enableSocks ? addressRemote : proxyIP || addressRemote;
+      const tcpSocket = await connectAndWrite(retryAddress, portRemote, enableSocks);
+      tcpSocket.closed.catch(e => log(`retry tcpSocket closed error: ${e}`))
+        .finally(() => safeCloseWebSocket(webSocket));
+      remoteSocketToWS(tcpSocket, webSocket, vlessResponseHeader, null, log);
+    } catch (e) {
+      log(`retry failed: ${e}`);
+      safeCloseWebSocket(webSocket);
+    }
+  }
+
+  // -------------------------
+  // 首次连接
+  // -------------------------
+  let tcpSocket;
+  try {
+    tcpSocket = await connectAndWrite(addressRemote, portRemote);
+  } catch (e) {
+    log(`Initial TCP connection failed: ${e}`);
+    return retry();
+  }
+
+  // -------------------------
+  // TCP -> WebSocket 流转发
+  // -------------------------
+  remoteSocketToWS(tcpSocket, webSocket, vlessResponseHeader, retry, log);
 }
+
+/**
+ * 安全关闭 WebSocket
+ */
+function safeCloseWebSocket(ws) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try { ws.close(); } catch (e) { console.log('WebSocket close error:', e); }
+  }
+}
+
+/**
+ * TCP Socket -> WebSocket 数据流转发
+ */
+async function remoteSocketToWS(tcpSocket, ws, header, onRetry, log) {
+  try {
+    const reader = tcpSocket.readable.getReader();
+
+    if (header) ws.send(header); // 写入 VLESS Header
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) ws.send(value); // 分块写入 WebSocket
+    }
+  } catch (e) {
+    log(`remoteSocketToWS error: ${e}`);
+    if (onRetry) onRetry();
+  } finally {
+    safeCloseWebSocket(ws);
+  }
+}
+
 
 /**
  * 将 WebSocket 转换为可读流（ReadableStream）
