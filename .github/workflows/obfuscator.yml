@@ -31,8 +31,8 @@ jobs:
           --compact true \
           --control-flow-flattening true \
           --control-flow-flattening-threshold 0.75 \
-          --dead-code-injection false \
-          --dead-code-injection-threshold 0.6 \
+          --dead-code-injection true \
+          --dead-code-injection-threshold 0.1 \
           --identifier-names-generator mangled \
           --rename-globals true \
           --string-array true \
