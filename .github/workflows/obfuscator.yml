@@ -37,12 +37,12 @@ jobs:
           echo "Using prefix: $PREFIX"
 
           javascript-obfuscator works-source.js \
-            --output _worker.js \
+            --output works-source_obfuscated.js \
             --compact true \
             --control-flow-flattening false \
             --dead-code-injection false \
             --string-array true \
-            --string-array-encoding 'rc4' \
+            --string-array-encoding 'base64,rc4' \
             --string-array-threshold 0.7 \
             --rename-globals true \
             --identifier-names-generator mangled \
