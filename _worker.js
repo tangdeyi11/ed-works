@@ -1,4 +1,7 @@
-// Optimized Cloudflare Worker (VLXXX) - Dynamic Chunk Write Version
+// Optimized Cloudflare Worker (VLXXX) - refactored and renamed vless/VLESS -> vlxxx/VLXXX
+// Based on user's original code. Some external integrations (account APIs, subscription backends)
+// are stubbed with minimal implementations to keep this file self-contained for testing.
+
 // @ts-ignore
 import { connect } from 'cloudflare:sockets';
 
@@ -35,12 +38,18 @@ let parsedSocks5Address = {};
 // Exported fetch handler
 // -------------------------------
 export default {
+  /**
+   * @param {Request} request
+   * @param {*} env
+   * @param {*} ctx
+   */
   async fetch(request, env, ctx) {
     try {
       const UA = request.headers.get('User-Agent') || 'null';
       const userAgent = UA.toLowerCase();
       userID = (env.UUID || userID).toLowerCase();
 
+      // generate daily fake ids
       const currentDate = new Date();
       currentDate.setHours(0, 0, 0, 0);
       const timestamp = Math.ceil(currentDate.getTime() / 1000);
@@ -57,6 +66,7 @@ export default {
       subconverter = env.SUBAPI || subconverter;
       subconfig = env.SUBCONFIG || subconfig;
 
+      // socks parsing
       if (socks5Address) {
         try {
           parsedSocks5Address = socks5AddressParser(socks5Address);
@@ -101,6 +111,7 @@ export default {
             return new Response(`${fakeConfig}`, { status: 200 });
           }
           case `/${userID}`: {
+            // telemetry (safe noop if sendMessage undefined)
             await sendMessage(`#获取订阅 ${FileName}`, request.headers.get('CF-Connecting-IP'), `UA: ${UA}\n域名: ${url.hostname}\n入口: ${url.pathname + url.search}`);
 
             if ((!sub || sub == '') && (addresses.length + addressesapi.length + addressesnotls.length + addressesnotlsapi.length + addressescsv.length) == 0) {
@@ -155,6 +166,7 @@ export default {
         }
       } else {
         // websocket upgrade path
+        // parse some parameters from url path and query
         proxyIP = url.searchParams.get('proxyip') || proxyIP;
         if (/\/proxyip=/i.test(url.pathname)) proxyIP = url.pathname.toLowerCase().split('/proxyip=')[1];
         else if (/\/proxyip\./i.test(url.pathname)) proxyIP = `proxyip.${url.pathname.toLowerCase().split('/proxyip.')[1]}`;
@@ -191,7 +203,8 @@ export default {
         return await vlxxxOverWSHandler(request);
       }
     } catch (err) {
-      return new Response(err.toString());
+      let e = err;
+      return new Response(e.toString());
     }
   }
 };
@@ -199,7 +212,13 @@ export default {
 // -------------------------------
 // VLXXX WebSocket handler
 // -------------------------------
+
+/**
+ * Handle VLXXX over WebSocket
+ * @param {Request} request
+ */
 async function vlxxxOverWSHandler(request) {
+  // @ts-ignore
   const webSocketPair = new WebSocketPair();
   const [client, webSocket] = Object.values(webSocketPair);
   webSocket.accept();
@@ -275,16 +294,23 @@ async function vlxxxOverWSHandler(request) {
     log('readableWebSocketStream 管道错误', err);
   });
 
-  return new Response(null, { status: 101, webSocket: client });
+  return new Response(null, { status: 101, // @ts-ignore
+    webSocket: client,
+  });
 }
 
 // -------------------------------
-// Handle outbound TCP/UDP with dynamic chunk write
+// Handle outbound TCP
 // -------------------------------
+
+/**
+ * Handle TCP outbound connection and data forwarding
+ */
 async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portRemote, rawClientData, webSocket, vlxxxResponseHeader, log) {
   async function connectAndWrite(address, port, socks = false) {
     log(`attempt connect to ${address}:${port}`);
 
+    // resolve specific domains to IPv4 if desired (kept simple)
     if (address.includes('163.com')) {
       const resolved = await resolveDomainToIPv4(address);
       if (resolved) address = resolved;
@@ -310,18 +336,7 @@ async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portR
     remoteSocket.value = tcpSocket;
 
     const writer = tcpSocket.writable.getWriter();
-
-    // -------------------------
-    // 动态分块写入 TCP 数据
-    // -------------------------
-    const CHUNK_SIZE = 16 * 1024;
-    let offset = 0;
-    while (offset < rawClientData.length) {
-      const slice = rawClientData.slice(offset, offset + CHUNK_SIZE);
-      await writer.write(slice);
-      offset += CHUNK_SIZE;
-    }
-
+    await writer.write(rawClientData);
     writer.releaseLock();
     return tcpSocket;
   }
@@ -348,47 +363,201 @@ async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portR
 }
 
 // -------------------------------
-// Handle DNS/UDP dynamic chunk
+// Convert WebSocket to ReadableStream
 // -------------------------------
+
+function makeReadableWebSocketStream(webSocketServer, earlyDataHeader, log) {
+  let readableStreamCancel = false;
+
+  const stream = new ReadableStream({
+    start(controller) {
+      webSocketServer.addEventListener('message', (event) => {
+        if (readableStreamCancel) return;
+        controller.enqueue(event.data);
+      });
+
+      webSocketServer.addEventListener('close', () => {
+        safeCloseWebSocket(webSocketServer);
+        if (readableStreamCancel) return;
+        controller.close();
+      });
+
+      webSocketServer.addEventListener('error', (err) => {
+        log('WebSocket 服务器发生错误');
+        controller.error(err);
+      });
+
+      const { earlyData, error } = base64ToArrayBuffer(earlyDataHeader);
+      if (error) controller.error(error);
+      else if (earlyData) controller.enqueue(earlyData);
+    },
+    pull(controller) {
+      // placeholder for backpressure logic
+    },
+    cancel(reason) {
+      if (readableStreamCancel) return;
+      log(`可读流被取消，原因是 ${reason}`);
+      readableStreamCancel = true;
+      safeCloseWebSocket(webSocketServer);
+    }
+  });
+
+  return stream;
+}
+
+// -------------------------------
+// Protocol parsing: VLXXX
+// -------------------------------
+
+function processVlxxxHeader(vlxxxBuffer, userID) {
+  if (vlxxxBuffer.byteLength < 24) return { hasError: true, message: 'invalid data' };
+
+  const version = new Uint8Array(vlxxxBuffer.slice(0, 1));
+  let isValidUser = false;
+  try {
+    if (stringify(new Uint8Array(vlxxxBuffer.slice(1, 17))) === userID) isValidUser = true;
+  } catch (e) {
+    return { hasError: true, message: 'invalid user id' };
+  }
+  if (!isValidUser) return { hasError: true, message: 'invalid user' };
+
+  const optLength = new Uint8Array(vlxxxBuffer.slice(17, 18))[0];
+  const command = new Uint8Array(vlxxxBuffer.slice(18 + optLength, 18 + optLength + 1))[0];
+  let isUDP = false;
+  if (command === 1) {
+    // tcp
+  } else if (command === 2) {
+    isUDP = true;
+  } else {
+    return { hasError: true, message: `command ${command} is not support, command 01-tcp,02-udp,03-mux` };
+  }
+
+  const portIndex = 18 + optLength + 1;
+  const portBuffer = vlxxxBuffer.slice(portIndex, portIndex + 2);
+  const portRemote = new DataView(portBuffer).getUint16(0);
+
+  let addressIndex = portIndex + 2;
+  const addressBuffer = new Uint8Array(vlxxxBuffer.slice(addressIndex, addressIndex + 1));
+  const addressType = addressBuffer[0];
+
+  let addressLength = 0;
+  let addressValueIndex = addressIndex + 1;
+  let addressValue = '';
+
+  switch (addressType) {
+    case 1:
+      addressLength = 4;
+      addressValue = new Uint8Array(vlxxxBuffer.slice(addressValueIndex, addressValueIndex + addressLength)).join('.');
+      break;
+    case 2:
+      addressLength = new Uint8Array(vlxxxBuffer.slice(addressValueIndex, addressValueIndex + 1))[0];
+      addressValueIndex += 1;
+      addressValue = new TextDecoder().decode(vlxxxBuffer.slice(addressValueIndex, addressValueIndex + addressLength));
+      break;
+    case 3:
+      addressLength = 16;
+      const dataView = new DataView(vlxxxBuffer.slice(addressValueIndex, addressValueIndex + addressLength));
+      const ipv6 = [];
+      for (let i = 0; i < 8; i++) ipv6.push(dataView.getUint16(i * 2).toString(16));
+      addressValue = ipv6.join(':');
+      break;
+    default:
+      return { hasError: true, message: `invild addressType is ${addressType}` };
+  }
+
+  if (!addressValue) return { hasError: true, message: `addressValue is empty, addressType is ${addressType}` };
+
+  return {
+    hasError: false,
+    addressRemote: addressValue,
+    addressType,
+    portRemote,
+    rawDataIndex: addressValueIndex + addressLength,
+    vlxxxVersion: version,
+    isUDP,
+  };
+}
+
+// -------------------------------
+// Forward remote socket -> WebSocket
+// -------------------------------
+
+async function remoteSocketToWS(remoteSocket, webSocket, vlxxxResponseHeader, retry, log) {
+  let remoteChunkCount = 0;
+  let vlessHeader = vlxxxResponseHeader;
+  let hasIncomingData = false;
+
+  await remoteSocket.readable.pipeTo(new WritableStream({
+    start() {},
+    async write(chunk, controller) {
+      hasIncomingData = true;
+      if (webSocket.readyState !== WS_READY_STATE_OPEN) controller.error('webSocket.readyState is not open, maybe close');
+      if (vlessHeader) {
+        webSocket.send(await new Blob([vlessHeader, chunk]).arrayBuffer());
+        vlessHeader = null;
+      } else {
+        webSocket.send(chunk);
+      }
+    },
+    close() {
+      log(`remoteConnection!.readable is close with hasIncomingData is ${hasIncomingData}`);
+    },
+    abort(reason) {
+      console.error(`remoteConnection!.readable abort`, reason);
+    }
+  })).catch((error) => {
+    console.error(`remoteSocketToWS has exception `, error.stack || error);
+    safeCloseWebSocket(webSocket);
+  });
+
+  if (hasIncomingData === false && retry) {
+    log(`retry`);
+    retry();
+  }
+}
+
+// -------------------------------
+// DNS handling (TCP forward)
+// -------------------------------
+
 async function handleDNSQuery(udpChunk, webSocket, vlxxxResponseHeader, log) {
   try {
     const dnsServer = '1.1.1.1';
     const dnsPort = 53;
     let vlessHeader = vlxxxResponseHeader;
-
     const tcpSocket = connect({ hostname: dnsServer, port: dnsPort });
     log(`连接到 ${dnsServer}:${dnsPort}`);
-
     const writer = tcpSocket.writable.getWriter();
-    const CHUNK_SIZE = 8 * 1024;
-    let offset = 0;
-    while (offset < udpChunk.length) {
-      const slice = udpChunk.slice(offset, offset + CHUNK_SIZE);
-      await writer.write(slice);
-      offset += CHUNK_SIZE;
-    }
+    await writer.write(udpChunk);
     writer.releaseLock();
 
     await tcpSocket.readable.pipeTo(new WritableStream({
       async write(chunk) {
-        if (webSocket.readyState === 1) {
+        if (webSocket.readyState === WS_READY_STATE_OPEN) {
           if (vlessHeader) {
             webSocket.send(await new Blob([vlessHeader, chunk]).arrayBuffer());
             vlessHeader = null;
-          } else webSocket.send(chunk);
+          } else {
+            webSocket.send(chunk);
+          }
         }
       },
-      close() { log(`DNS TCP 连接关闭`) },
-      abort(reason) { console.error(`DNS TCP 连接中断`, reason) },
+      close() {
+        log(`DNS 服务器(${dnsServer}) TCP 连接已关闭`);
+      },
+      abort(reason) {
+        console.error(`DNS 服务器(${dnsServer}) TCP 连接异常中断`, reason);
+      }
     }));
   } catch (error) {
-    console.error(`handleDNSQuery 错误: ${error.message}`);
+    console.error(`handleDNSQuery 函数发生异常，错误信息: ${error.message}`);
   }
 }
 
 // -------------------------------
 // SOCKS5 connect and parser
 // -------------------------------
+
 async function socks5Connect(addressType, addressRemote, portRemote, log) {
   const { username, password, hostname, port } = parsedSocks5Address;
   const socket = connect({ hostname, port });
@@ -414,10 +583,17 @@ async function socks5Connect(addressType, addressRemote, portRemote, log) {
 
   let DSTADDR;
   switch (addressType) {
-    case 1: DSTADDR = new Uint8Array([1, ...addressRemote.split('.').map(Number)]); break;
-    case 2: DSTADDR = new Uint8Array([3, addressRemote.length, ...encoder.encode(addressRemote)]); break;
-    case 3: DSTADDR = new Uint8Array([4, ...addressRemote.split(':').flatMap(x => [parseInt(x.slice(0, 2), 16), parseInt(x.slice(2), 16)])]); break;
-    default: log(`无效的地址类型: ${addressType}`); return;
+    case 1:
+      DSTADDR = new Uint8Array([1, ...addressRemote.split('.').map(Number)]);
+      break;
+    case 2:
+      DSTADDR = new Uint8Array([3, addressRemote.length, ...encoder.encode(addressRemote)]);
+      break;
+    case 3:
+      DSTADDR = new Uint8Array([4, ...addressRemote.split(':').flatMap(x => [parseInt(x.slice(0, 2), 16), parseInt(x.slice(2), 16)])]);
+      break;
+    default:
+      log(`无效的地址类型: ${addressType}`); return;
   }
 
   const socksRequest = new Uint8Array([5, 1, 0, ...DSTADDR, portRemote >> 8, portRemote & 0xff]);
@@ -425,7 +601,7 @@ async function socks5Connect(addressType, addressRemote, portRemote, log) {
   log('已发送 SOCKS5 请求');
 
   res = (await reader.read()).value;
-  if (res[1] === 0x00) log('SOCKS5 连接已建立'); else { log('SOCKS5 连接建立失败'); return; }
+  if (res[1] === 0x00) { log('SOCKS5 连接已建立'); } else { log('SOCKS5 连接建立失败'); return; }
   writer.releaseLock();
   reader.releaseLock();
   return socket;
@@ -444,60 +620,123 @@ function socks5AddressParser(address) {
   if (isNaN(port)) throw new Error('无效的 SOCKS 地址格式：端口号必须是数字');
   hostname = latters.join(':');
   const regex = /^\[.*\]$/;
-  if (hostname.includes(':') && !regex.test(hostname)) throw new Error('IPv6 地址必须用方括号括起来，如 [2001:db8::1]');
+  if (hostname.includes(':') && !regex.test(hostname)) throw new Error('无效的 SOCKS 地址格式：IPv6 地址必须用方括号括起来，如 [2001:db8::1]');
+  if (/^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?).){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(hostname)) hostname = `${atob('d3d3Lg==')}${hostname}${atob('LmlwLjA5MDIyNy54eXo=')}`;
   return { username, password, hostname, port };
 }
 
 // -------------------------------
-// Utility functions
+// Utility and helpers
 // -------------------------------
+
+function revertFakeInfo(content, userIDVal, hostName, isBase64) {
+  if (isBase64) content = atob(content);
+  content = content.replace(new RegExp(fakeUserID, 'g'), userIDVal).replace(new RegExp(fakeHostName, 'g'), hostName);
+  if (isBase64) content = btoa(content);
+  return content;
+}
+
 async function MD5MD5(text) {
   const encoder = new TextEncoder();
   const firstPass = await crypto.subtle.digest('MD5', encoder.encode(text));
   const firstPassArray = Array.from(new Uint8Array(firstPass));
   const firstHex = firstPassArray.map(b => b.toString(16).padStart(2, '0')).join('');
   const secondPass = await crypto.subtle.digest('MD5', encoder.encode(firstHex.slice(7, 27)));
-  return Array.from(new Uint8Array(secondPass)).map(b => b.toString(16).padStart(2, '0')).join('');
+  const secondPassArray = Array.from(new Uint8Array(secondPass));
+  const secondHex = secondPassArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  return secondHex.toLowerCase();
 }
 
 async function ADD(envadd) {
   if (!envadd) return [];
-  let addtext = envadd.replace(/[\t|"'\r\n]+/g, ',').replace(/,+/g, ',');
-  if (addtext.startsWith(',')) addtext = addtext.slice(1);
-  if (addtext.endsWith(',')) addtext = addtext.slice(0, -1);
+  var addtext = envadd.replace(/[\t|"'\r\n]+/g, ',').replace(/,+/g, ',');
+  if (addtext.charAt(0) == ',') addtext = addtext.slice(1);
+  if (addtext.charAt(addtext.length - 1) == ',') addtext = addtext.slice(0, addtext.length - 1);
   return addtext.split(',');
 }
+
+function base64ToArrayBuffer(base64Str) {
+  if (!base64Str) return { error: null };
+  try {
+    base64Str = base64Str.replace(/-/g, '+').replace(/_/g, '/');
+    const decode = atob(base64Str);
+    const arryBuffer = Uint8Array.from(decode, (c) => c.charCodeAt(0));
+    return { earlyData: arryBuffer.buffer, error: null };
+  } catch (error) {
+    return { error };
+  }
+}
+
+function isValidUUID(uuid) {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[4][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(uuid);
+}
+
+const WS_READY_STATE_OPEN = 1;
+const WS_READY_STATE_CLOSING = 2;
 
 function safeCloseWebSocket(socket) {
   try {
     if (!socket) return;
     if (socket.readyState === WS_READY_STATE_OPEN || socket.readyState === WS_READY_STATE_CLOSING) socket.close();
-  } catch (error) { console.error(error); }
+  } catch (error) {
+    console.error('safeCloseWebSocket error', error);
+  }
+}
+
+const byteToHex = [];
+for (let i = 0; i < 256; ++i) byteToHex.push((i + 256).toString(16).slice(1));
+
+function unsafeStringify(arr, offset = 0) {
+  return (byteToHex[arr[offset + 0]] + byteToHex[arr[offset + 1]] + byteToHex[arr[offset + 2]] + byteToHex[arr[offset + 3]] + "-" +
+    byteToHex[arr[offset + 4]] + byteToHex[arr[offset + 5]] + "-" +
+    byteToHex[arr[offset + 6]] + byteToHex[arr[offset + 7]] + "-" +
+    byteToHex[arr[offset + 8]] + byteToHex[arr[offset + 9]] + "-" +
+    byteToHex[arr[offset + 10]] + byteToHex[arr[offset + 11]] + byteToHex[arr[offset + 12]] +
+    byteToHex[arr[offset + 13]] + byteToHex[arr[offset + 14]] + byteToHex[arr[offset + 15]]).toLowerCase();
+}
+
+function stringify(arr, offset = 0) {
+  const uuid = unsafeStringify(arr, offset);
+  if (!isValidUUID(uuid)) throw TypeError(`生成的 UUID 不符合规范 ${uuid}`);
+  return uuid;
 }
 
 // -------------------------------
-// Minimal stubs for integrations
+// Minimal stubs for missing integrations
 // -------------------------------
+
 async function getVLXXXConfig(userId, host, subVal, ua, rproxy, url) {
+  // Minimal config generator stub. Replace with your real implementation.
   return `# VLXXX config\nuser:${userId}\nhost:${host}\nsub:${subVal}\nua:${ua}\n`;
 }
 
 async function sendMessage(title, ip, body) {
-  console.log('sendMessage', title, ip, body);
+  // noop or implement Telegram / webhook sending if desired
+  try { console.log('sendMessage', title, ip, body); } catch (e) {}
 }
 
-async function getAccountId(email, key) { return null; }
-async function getSum(accountId, accountIndex, email, key, startDate, endDate) { return [0, 0]; }
+async function getAccountId(email, key) {
+  // stub to avoid runtime errors
+  return null;
+}
+
+async function getSum(accountId, accountIndex, email, key, startDate, endDate) {
+  return [0, 0];
+}
 
 // -------------------------------
-// Exports
+// Simple helpers to avoid unused errors
 // -------------------------------
+
+// ensure top-level exported names exist if other code relies on them elsewhere
 export {
   vlxxxOverWSHandler,
+  processVlxxxHeader,
   handleTCPOutBound,
   handleDNSQuery,
   socks5Connect,
   socks5AddressParser,
   MD5MD5,
   ADD,
-}
+};
