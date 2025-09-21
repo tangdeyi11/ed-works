@@ -167,7 +167,7 @@ export default {
       } else {
         // websocket upgrade path
         // parse some parameters from url path and query
-        proxyIP = url.searchParams.get('proxyip') || proxyIP;
+        proxyIP = url.searchParams.get('proxyip');
         if (/\/proxyip=/i.test(url.pathname)) proxyIP = url.pathname.toLowerCase().split('/proxyip=')[1];
         else if (/\/proxyip\./i.test(url.pathname)) proxyIP = `proxyip.${url.pathname.toLowerCase().split('/proxyip.')[1]}`;
         else if (/sg.dtcs520.com/i.test(url.pathname)) proxyIP = 'sg.dtcs520.com';
