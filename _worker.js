@@ -167,13 +167,22 @@ export default {
       } else {
         // websocket upgrade path
         // parse some parameters from url path and query
+        
+        //url.searchParams.get用于匹配查询参数，格式如/?proxyip=jp.dtcs520.com，主要是?号代表查询参数
         proxyIP = url.searchParams.get('proxyip');
+        //以下都是url.pathname查询方式，用于匹配路径，格式如/proxyip=jp.dtcs520.com，没有?号，只有/代表路径，由于客户端都是传查询参数，即/?proxyip格式，不是/proxyip的路径格式
+        //所以默认以下两条语句不生效，除非客户端路径(PATH)部分写成/proxyip=jp.dtcs520.com，即不带?号的格式才能使以下两条语句生效
+        //另外如果路径PATH写成只有proxyip=(即=号后面没有内容)，会匹配以下第一条规则，但是会使proxyIP的值为空，导致需要proxyIP的访问失败
         if (/\/proxyip=/i.test(url.pathname)) proxyIP = url.pathname.toLowerCase().split('/proxyip=')[1];
         else if (/\/proxyip\./i.test(url.pathname)) proxyIP = `proxyip.${url.pathname.toLowerCase().split('/proxyip.')[1]}`;
+        //以下四条是实际使用的内容，使用/sg.dtcs520.com/i（前后/是正则表达式，匹配前后/内的内容，i表示转为小写字符），和(url.pathname)进行路径匹配，只要路径中包含以下4条语句中的一条，则分配对应proxyIP
         else if (/sg.dtcs520.com/i.test(url.pathname)) proxyIP = 'sg.dtcs520.com';
         else if (/hk.dtcs520.com/i.test(url.pathname)) proxyIP = 'hk.dtcs520.com';
         else if (/jp.dtcs520.com/i.test(url.pathname)) proxyIP = 'jp.dtcs520.com';
         else if (/us.dtcs520.com/i.test(url.pathname)) proxyIP = 'us.dtcs520.com';
+        //下面的语句用于匹配两种情况：
+        //如果路径PATH中的内容为空（不输入任何内容），之前的proxyIP = url.searchParams.get('proxyip');语句的执行结果会认为proxyIP参数为null，即false，匹配下面语句的!proxyIP条件，保底分配proxyIP = 'sg.dtcs520.com'
+        //如果路径PATH中仅输入了/?proxyip=(即=号后面没有内容)，之前的proxyIP = url.searchParams.get('proxyip');语句的执行结果会认为proxyIP为''，即空，匹配下面语句的proxyIP == ''条件，保底分配proxyIP = 'sg.dtcs520.com'
         else if (!proxyIP || proxyIP == '') proxyIP = 'sg.dtcs520.com';
 
         socks5Address = url.searchParams.get('socks5') || socks5Address;
