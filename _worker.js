@@ -45,6 +45,36 @@ export default {
    */
   async fetch(request, env, ctx) {
     try {
+	  // -------------------- 新增 /debug 分支 --------------------
+	  // 下一句需要拿到请求的路径 (pathname) 来判断是否访问了 /debug
+	  const url = new URL(request.url);
+      
+      // -------------------- 新增 /debug 分支 --------------------
+      if (url.pathname.toLowerCase() === '/debug') {
+        const rayHeader = request.headers.get("cf-ray");
+        const entryColo = rayHeader ? rayHeader.split("-")[1] : "unknown";
+        const execColo = request.cf?.colo || "unknown";
+
+        const match = (entryColo === execColo) ? "一致 ✅" : "不一致 ⚠️";
+
+        const debugInfo = {
+          entryColo,   // 请求入口节点
+          execColo,    // 实际执行节点
+          result: match,
+          country: request.cf?.country,
+          city: request.cf?.city,
+          asn: request.cf?.asn,
+          timezone: request.cf?.timezone,
+          ua: request.headers.get('User-Agent')
+        };
+
+        return new Response(JSON.stringify(debugInfo, null, 2), {
+          status: 200,
+          headers: { "Content-Type": "application/json;charset=utf-8" }
+        });
+      }
+      // -------------------- /debug 分支结束 --------------------
+		
       const UA = request.headers.get('User-Agent') || 'null';
       const userAgent = UA.toLowerCase();
       userID = (env.UUID || userID).toLowerCase();
