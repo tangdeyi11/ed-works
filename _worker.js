@@ -352,8 +352,8 @@ async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portR
     // resolve specific domains to IPv4 if desired (kept simple)
     // 注释整段google DNS解析功能，开头使用 /*，结尾使用*/
 	// 通过将address变量的域名值事先解析成IPv4地址，这样在下面的connect阶段将通过IPv4地址建立TCP会话，从而避免通过IPv6连接
-	if (address.includes('fast.com') || address.includes('netflix.com') || address.includes('netflix.net') || address.includes('nflxext.com') || address.includes('nflxso.net') || address.includes('nflxvideo.net') || address.includes('nflxsearch.net') || address.includes('nflximg.com')) {
-    //if (address.includes('163.com')) {
+	//if (address.includes('fast.com') || address.includes('netflix.com') || address.includes('netflix.net') || address.includes('nflxext.com') || address.includes('nflxso.net') || address.includes('nflxvideo.net') || address.includes('nflxsearch.net') || address.includes('nflximg.com')) {
+    if (address.includes('163.com')) {
       const resolved = await resolveDomainToIPv4(address);
       if (resolved) address = resolved;
     }
