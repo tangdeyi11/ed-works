@@ -11,7 +11,7 @@ import { connect } from 'cloudflare:sockets';
 let userID = 'df3a46a8-6f37-4ed8-afb5-e8f71b02500c';
 let proxyIP = '';
 let sub = '';
-let subconverter = 'subapi.dtcs520.ggff.net';
+let subconverter = 'subapi.dtcs.dpdns.org';
 let subconfig = "https://raw.githubusercontent.com/tangdeyi11/dyconfig/main/rule.ini";
 let socks5Address = '';
 let fakeUserID;
