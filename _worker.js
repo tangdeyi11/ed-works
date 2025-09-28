@@ -257,6 +257,7 @@ export default {
  * @param {Request} request
  */
 async function vlxxxOverWSHandler(request) {
+  // @ts-ignore
   const webSocketPair = new WebSocketPair();
   const [client, webSocket] = Object.values(webSocketPair);
   webSocket.accept();
@@ -273,15 +274,13 @@ async function vlxxxOverWSHandler(request) {
   let remoteSocketWrapper = { value: null };
   let isDns = false;
 
-  // WebSocket -> TCP 流式处理
   readableWebSocketStream.pipeTo(new WritableStream({
     async write(chunk) {
       if (isDns) {
-        return handleDNSQuery(chunk, webSocket, null, log);
+        return await handleDNSQuery(chunk, webSocket, null, log);
       }
 
       if (remoteSocketWrapper.value) {
-        // 复用 writer 写入 TCP
         const writer = remoteSocketWrapper.value.writable.getWriter();
         await writer.write(chunk);
         writer.releaseLock();
@@ -302,28 +301,42 @@ async function vlxxxOverWSHandler(request) {
       address = addressRemote;
       portWithRandomLog = `${portRemote}--${Math.random()} ${isUDP ? 'udp ' : 'tcp '} `;
 
-      if (hasError) throw new Error(message);
+      if (hasError) {
+        throw new Error(message);
+      }
 
       if (isUDP) {
-        if (portRemote === 53) isDns = true;
-        else throw new Error('UDP 代理仅对 DNS（53 端口）启用');
+        if (portRemote === 53) {
+          isDns = true;
+        } else {
+          throw new Error('UDP 代理仅对 DNS（53 端口）启用');
+        }
       }
 
       const vlxxxResponseHeader = new Uint8Array([vlxxxVersion[0], 0]);
       const rawClientData = chunk.slice(rawDataIndex);
 
-      if (isDns) return handleDNSQuery(rawClientData, webSocket, vlxxxResponseHeader, log);
+      if (isDns) {
+        return handleDNSQuery(rawClientData, webSocket, vlxxxResponseHeader, log);
+      }
 
       log(`处理 TCP 出站连接 ${addressRemote}:${portRemote}`);
       handleTCPOutBound(remoteSocketWrapper, addressType, addressRemote, portRemote, rawClientData, webSocket, vlxxxResponseHeader, log);
     },
-    close() { log(`readableWebSocketStream 已关闭`); },
-    abort(reason) { log(`readableWebSocketStream 已中止`, JSON.stringify(reason)); },
-  })).catch(err => log('readableWebSocketStream 管道错误', err));
+    close() {
+      log(`readableWebSocketStream 已关闭`);
+    },
+    abort(reason) {
+      log(`readableWebSocketStream 已中止`, JSON.stringify(reason));
+    },
+  })).catch((err) => {
+    log('readableWebSocketStream 管道错误', err);
+  });
 
-  return new Response(null, { status: 101, webSocket: client });
+  return new Response(null, { status: 101, // @ts-ignore
+    webSocket: client,
+  });
 }
-
 
 // -------------------------------
 // Handle outbound TCP
@@ -332,145 +345,107 @@ async function vlxxxOverWSHandler(request) {
 /**
  * Handle TCP outbound connection and data forwarding
  */
-async function handleTCPOutBound(remoteSocketWrapper, addressType, addressRemote, portRemote, rawClientData, webSocket, vlxxxResponseHeader, log) {
-  // DNS解析或特定域名转换 IPv4
-  async function resolveAddress(addr) {
+async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portRemote, rawClientData, webSocket, vlxxxResponseHeader, log) {
+  async function connectAndWrite(address, port, socks = false) {
+    log(`attempt connect to ${address}:${port}`);
+
+    // resolve specific domains to IPv4 if desired (kept simple)
     // 注释整段google DNS解析功能，开头使用 /*，结尾使用*/
 	// 通过将address变量的域名值事先解析成IPv4地址，这样在下面的connect阶段将通过IPv4地址建立TCP会话，从而避免通过IPv6连接
-	//if (!(address.includes('fast.com') || address.includes('netflix.com') || address.includes('netflix.net') || address.includes('nflxext.com') || address.includes('nflxso.net') || address.includes('nflxvideo.net') || address.includes('nflxsearch.net') || address.includes('nflximg.com'))) return addr;
-	if (!addr.includes('163.com')) return addr; // 保留你的逻辑
-    try {
-      const resp = await fetch(`https://dns.google/resolve?name=${addr}&type=A`);
-      if (!resp.ok) return addr;
-      const data = await resp.json();
-      const record = data.Answer?.find(r => r.type === 1);
-      return record ? record.data : addr;
-    } catch (e) {
-      console.error('DNS resolution error:', e);
-      return addr;
+	//if (address.includes('fast.com') || address.includes('netflix.com') || address.includes('netflix.net') || address.includes('nflxext.com') || address.includes('nflxso.net') || address.includes('nflxvideo.net') || address.includes('nflxsearch.net') || address.includes('nflximg.com')) {
+    if (address.includes('163.com')) {
+      const resolved = await resolveDomainToIPv4(address);
+      if (resolved) address = resolved;
     }
-  }
 
-  addressRemote = await resolveAddress(addressRemote);
+    async function resolveDomainToIPv4(addr) {
+      try {
+        const resp = await fetch(`https://dns.google/resolve?name=${addr}&type=A`);
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        if (data.Status === 0 && Array.isArray(data.Answer)) {
+          const record = data.Answer.find(r => r.type === 1);
+          return record ? record.data : null;
+        }
+        return null;
+      } catch (e) {
+        console.error('DNS resolution error:', e);
+        return null;
+      }
+    }
 
-  // 建立 TCP 连接
-  async function connectAndWrite(addr, port) {
-    const tcpSocket = await connect({ hostname: addr, port });
-    remoteSocketWrapper.value = tcpSocket;
+    const tcpSocket = socks ? await socks5Connect(addressType, address, port, log) : connect({ hostname: address, port: port });
+    remoteSocket.value = tcpSocket;
 
-    // 写入首个客户端数据
     const writer = tcpSocket.writable.getWriter();
     await writer.write(rawClientData);
     writer.releaseLock();
-
     return tcpSocket;
   }
 
-  // -----------------------
-  // retry 函数
-  // -----------------------
   async function retry() {
-    let tcpSocket = await connectAndWrite(proxyIP || addressRemote, portRemote);
-    tcpSocket.closed.catch(error => console.log('retry tcpSocket closed error', error))
-      .finally(() => safeCloseWebSocket(webSocket));
+    let tcpSocket;
+    if (enableSocks) {
+      tcpSocket = await connectAndWrite(addressRemote, portRemote, true);
+    } else {
+      tcpSocket = await connectAndWrite(proxyIP || addressRemote, portRemote);
+    }
 
-    // 将 TCP 响应流 pipe 回 WebSocket（首包 VLXXX 响应头已在首次 pipeTo 中处理）
-    pipeTcpToWebSocket(tcpSocket, webSocket, vlxxxResponseHeader, log);
+    tcpSocket.closed.catch(error => {
+      console.log('retry tcpSocket closed error', error);
+    }).finally(() => {
+      safeCloseWebSocket(webSocket);
+    });
+
+    remoteSocketToWS(tcpSocket, webSocket, vlxxxResponseHeader, null, log);
   }
 
-  // -----------------------
-  // 初次 TCP 连接并 pipe
-  // -----------------------
-  const tcpSocket = await connectAndWrite(addressRemote, portRemote);
-  pipeTcpToWebSocket(tcpSocket, webSocket, vlxxxResponseHeader, log, retry);
+  let tcpSocket = await connectAndWrite(addressRemote, portRemote);
+  remoteSocketToWS(tcpSocket, webSocket, vlxxxResponseHeader, retry, log);
 }
 
-// 将 TCP 响应流 pipe 到 WebSocket（首包插入 VLXXX 响应头）
-function pipeTcpToWebSocket(tcpSocket, webSocket, vlxxxResponseHeader, log, retry) {
-  let firstChunk = true;
-  tcpSocket.readable.pipeTo(new WritableStream({
-    async write(chunk) {
-      if (webSocket.readyState !== WS_READY_STATE_OPEN) return;
-
-      if (firstChunk && vlxxxResponseHeader) {
-        webSocket.send(await new Blob([vlxxxResponseHeader, chunk]).arrayBuffer());
-        firstChunk = false;
-      } else {
-        webSocket.send(chunk);
-      }
-    },
-    close() { log(`TCP 连接已关闭`); },
-    abort(reason) { 
-      console.error(`TCP 连接异常中断`, reason); 
-      safeCloseWebSocket(webSocket);
-    }
-  })).catch(err => {
-    console.error('pipeTo WebSocket error', err);
-    safeCloseWebSocket(webSocket);
-
-    // 首包无数据时触发 retry
-    if (firstChunk && retry) retry();
-  });
-}
-
-
 // -------------------------------
-// Convert WebSocket to ReadableStream (优化版)
+// Convert WebSocket to ReadableStream
 // -------------------------------
+
 function makeReadableWebSocketStream(webSocketServer, earlyDataHeader, log) {
   let readableStreamCancel = false;
 
   const stream = new ReadableStream({
     start(controller) {
-      // WebSocket 消息事件
       webSocketServer.addEventListener('message', (event) => {
         if (readableStreamCancel) return;
         controller.enqueue(event.data);
       });
 
-      // WebSocket 关闭事件
       webSocketServer.addEventListener('close', () => {
-        if (readableStreamCancel) return;
-        readableStreamCancel = true;
         safeCloseWebSocket(webSocketServer);
+        if (readableStreamCancel) return;
         controller.close();
       });
 
-      // WebSocket 错误事件
       webSocketServer.addEventListener('error', (err) => {
-        if (readableStreamCancel) return;
-        readableStreamCancel = true;
-        log('WebSocket 服务器发生错误', err);
+        log('WebSocket 服务器发生错误');
         controller.error(err);
       });
 
-      // 处理 earlyDataHeader
-      try {
-        const { earlyData, error } = base64ToArrayBuffer(earlyDataHeader);
-        if (error) controller.error(error);
-        else if (earlyData) controller.enqueue(earlyData);
-      } catch (e) {
-        controller.error(e);
-      }
+      const { earlyData, error } = base64ToArrayBuffer(earlyDataHeader);
+      if (error) controller.error(error);
+      else if (earlyData) controller.enqueue(earlyData);
     },
-
-    // 可扩展 backpressure 支持
     pull(controller) {
-      // 后续可根据需要暂停/恢复读取
+      // placeholder for backpressure logic
     },
-
-    // 可读流取消
     cancel(reason) {
       if (readableStreamCancel) return;
+      log(`可读流被取消，原因是 ${reason}`);
       readableStreamCancel = true;
-      log(`可读流被取消，原因: ${reason}`);
       safeCloseWebSocket(webSocketServer);
     }
   });
 
   return stream;
 }
-
 
 // -------------------------------
 // Protocol parsing: VLXXX
