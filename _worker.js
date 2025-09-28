@@ -333,14 +333,12 @@ async function vlxxxOverWSHandler(request) {
  * Handle TCP outbound connection and data forwarding
  */
 async function handleTCPOutBound(remoteSocketWrapper, addressType, addressRemote, portRemote, rawClientData, webSocket, vlxxxResponseHeader, log) {
-
   // DNS解析或特定域名转换 IPv4
   async function resolveAddress(addr) {
-	// resolve specific domains to IPv4 if desired (kept simple)
     // 注释整段google DNS解析功能，开头使用 /*，结尾使用*/
 	// 通过将address变量的域名值事先解析成IPv4地址，这样在下面的connect阶段将通过IPv4地址建立TCP会话，从而避免通过IPv6连接
 	//if (!(address.includes('fast.com') || address.includes('netflix.com') || address.includes('netflix.net') || address.includes('nflxext.com') || address.includes('nflxso.net') || address.includes('nflxvideo.net') || address.includes('nflxsearch.net') || address.includes('nflximg.com'))) return addr;
-    if (!addr.includes('163.com')) return addr;
+	if (!addr.includes('163.com')) return addr; // 保留你的逻辑
     try {
       const resp = await fetch(`https://dns.google/resolve?name=${addr}&type=A`);
       if (!resp.ok) return addr;
@@ -356,22 +354,45 @@ async function handleTCPOutBound(remoteSocketWrapper, addressType, addressRemote
   addressRemote = await resolveAddress(addressRemote);
 
   // 建立 TCP 连接
-  const tcpSocket = await connect({ hostname: addressRemote, port: portRemote });
-  remoteSocketWrapper.value = tcpSocket;
+  async function connectAndWrite(addr, port) {
+    const tcpSocket = await connect({ hostname: addr, port });
+    remoteSocketWrapper.value = tcpSocket;
 
-  // 写入首个客户端数据（VLXXX 响应头插入在 pipeTo 中处理）
-  const writer = tcpSocket.writable.getWriter();
-  await writer.write(rawClientData);
-  writer.releaseLock();
+    // 写入首个客户端数据
+    const writer = tcpSocket.writable.getWriter();
+    await writer.write(rawClientData);
+    writer.releaseLock();
 
-  // 将 TCP 响应流 pipe 回 WebSocket
+    return tcpSocket;
+  }
+
+  // -----------------------
+  // retry 函数
+  // -----------------------
+  async function retry() {
+    let tcpSocket = await connectAndWrite(proxyIP || addressRemote, portRemote);
+    tcpSocket.closed.catch(error => console.log('retry tcpSocket closed error', error))
+      .finally(() => safeCloseWebSocket(webSocket));
+
+    // 将 TCP 响应流 pipe 回 WebSocket（首包 VLXXX 响应头已在首次 pipeTo 中处理）
+    pipeTcpToWebSocket(tcpSocket, webSocket, vlxxxResponseHeader, log);
+  }
+
+  // -----------------------
+  // 初次 TCP 连接并 pipe
+  // -----------------------
+  const tcpSocket = await connectAndWrite(addressRemote, portRemote);
+  pipeTcpToWebSocket(tcpSocket, webSocket, vlxxxResponseHeader, log, retry);
+}
+
+// 将 TCP 响应流 pipe 到 WebSocket（首包插入 VLXXX 响应头）
+function pipeTcpToWebSocket(tcpSocket, webSocket, vlxxxResponseHeader, log, retry) {
   let firstChunk = true;
   tcpSocket.readable.pipeTo(new WritableStream({
     async write(chunk) {
       if (webSocket.readyState !== WS_READY_STATE_OPEN) return;
 
       if (firstChunk && vlxxxResponseHeader) {
-        // 首个 TCP chunk 前插入 VLXXX 响应头
         webSocket.send(await new Blob([vlxxxResponseHeader, chunk]).arrayBuffer());
         firstChunk = false;
       } else {
@@ -386,6 +407,9 @@ async function handleTCPOutBound(remoteSocketWrapper, addressType, addressRemote
   })).catch(err => {
     console.error('pipeTo WebSocket error', err);
     safeCloseWebSocket(webSocket);
+
+    // 首包无数据时触发 retry
+    if (firstChunk && retry) retry();
   });
 }
 
