@@ -197,7 +197,54 @@ export default {
       } else {
         // websocket upgrade path
         // parse some parameters from url path and query
-        
+
+        // ---------- 替换开始 ----------
+        /**
+         * 解析 proxyIP 的规则（局部变量，不直接受全局 proxyIP 影响）
+         * 规则：
+         *  1. 优先读取查询参数 ?proxyip=xxx 作为候选
+         *  2. 如果路径是 /proxyip=xxx 或 /proxyip.xxx，则以路径为准（并标记 matchedProxyPath）
+         *  3. 如果路径匹配不上前两条，则检查特定路径（sg/hk/jp/us.dtcs520.com）
+         *  4. 如果前两条路径未匹配（matchedProxyPath === false），**强制覆盖**为默认值 'sg.dtcs520.com'
+         */
+        {
+          // 使用局部变量避免受到上层全局变量的干扰
+          let pickedProxyIP = url.searchParams.get('proxyip'); // 可能为 null 或 '' 或实际值
+          let matchedProxyPath = false;
+          const path = url.pathname.toLowerCase();
+
+          // 优先检查严格的路径形式：/proxyip=xxx 或 /proxyip.xxx
+          if (/\/proxyip=/i.test(path)) {
+            // split 后可能为 undefined，故使用 || '' 兜底
+            pickedProxyIP = path.split('/proxyip=')[1] || '';
+            matchedProxyPath = true;
+          } else if (/\/proxyip\./i.test(path)) {
+            pickedProxyIP = `proxyip.${(path.split('/proxyip.')[1] || '')}`;
+            matchedProxyPath = true;
+          } else if (/sg\.dtcs520\.com/i.test(path)) {
+            // 特殊路径匹配（不会影响 matchedProxyPath）
+            pickedProxyIP = 'sg.dtcs520.com';
+          } else if (/hk\.dtcs520\.com/i.test(path)) {
+            pickedProxyIP = 'hk.dtcs520.com';
+          } else if (/jp\.dtcs520\.com/i.test(path)) {
+            pickedProxyIP = 'jp.dtcs520.com';
+          } else if (/us\.dtcs520\.com/i.test(path)) {
+            pickedProxyIP = 'us.dtcs520.com';
+          }
+
+          // 兜底逻辑：仅当前两条路径匹配失败时（matchedProxyPath === false），强制覆盖为默认
+          if (!matchedProxyPath) {
+            pickedProxyIP = 'sg.dtcs520.com';
+          }
+
+          // 最终把局部解析结果写回全局 proxyIP（覆盖全局）
+          proxyIP = pickedProxyIP;
+        }
+        // ---------- 替换结束 ----------
+
+		
+ 		
+		/*
         //url.searchParams.get用于匹配查询参数，格式如/?proxyip=jp.dtcs520.com，主要是?号代表查询参数
         proxyIP = url.searchParams.get('proxyip');
         //以下都是url.pathname查询方式，用于匹配路径，格式如/proxyip=jp.dtcs520.com，没有?号，只有/代表路径，由于客户端都是传查询参数，即/?proxyip格式，不是/proxyip的路径格式
@@ -214,7 +261,8 @@ export default {
         //如果路径PATH中的内容为空（不输入任何内容），之前的proxyIP = url.searchParams.get('proxyip');语句的执行结果会认为proxyIP参数为null，即false，匹配下面语句的!proxyIP条件，保底分配proxyIP = 'sg.dtcs520.com'
         //如果路径PATH中仅输入了/?proxyip=(即=号后面没有内容)，之前的proxyIP = url.searchParams.get('proxyip');语句的执行结果会认为proxyIP为''，即空，匹配下面语句的proxyIP == ''条件，保底分配proxyIP = 'sg.dtcs520.com'
         else if (!proxyIP || proxyIP == '') proxyIP = 'sg.dtcs520.com';
-
+        */
+		  
         socks5Address = url.searchParams.get('socks5') || socks5Address;
         if (/\/socks5=/i.test(url.pathname)) socks5Address = url.pathname.split('5=')[1];
         else if (/\/socks:\/\//i.test(url.pathname) || /\/socks5:\/\//i.test(url.pathname)) {
