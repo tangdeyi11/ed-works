@@ -209,8 +209,9 @@ export default {
          */
         {
           // 使用局部变量避免受到上层全局变量的干扰
-          let pickedProxyIP = url.searchParams.get('proxyip'); // query 参数优先
-          let matchedProxyPath = false;
+		  // 先取 query 参数
+          let pickedProxyIP = url.searchParams.get('proxyip'); // query 参数优先,可能为 null 或 ''
+          let matchedProxyPath = false;          // 标记路径匹配是否成功
           const path = url.pathname.toLowerCase();
 
           // 路径匹配：/proxyip=xxx 或 /proxyip.xxx
@@ -221,7 +222,7 @@ export default {
             pickedProxyIP = `proxyip.${(path.split('/proxyip.')[1] || '')}`;
             matchedProxyPath = true;
           } else if (/sg.dtcs520.com/i.test(path)) {
-            // 特殊路径匹配
+            // 特殊路径匹配,（不会影响 matchedProxyPath）
             pickedProxyIP = 'sg.dtcs520.com';
           } else if (/hk.dtcs520.com/i.test(path)) {
             pickedProxyIP = 'hk.dtcs520.com';
@@ -232,7 +233,7 @@ export default {
           }
 
           // 兜底逻辑：路径没匹配且 query 参数为空
-          if (!matchedProxyPath && !pickedProxyIP) {
+          if (!matchedProxyPath && (!pickedProxyIP || pickedProxyIP === '')) {
             pickedProxyIP = 'sg.dtcs520.com';
           }
 
