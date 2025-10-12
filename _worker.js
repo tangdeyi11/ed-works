@@ -209,35 +209,34 @@ export default {
          */
         {
           // 使用局部变量避免受到上层全局变量的干扰
-          let pickedProxyIP = url.searchParams.get('proxyip'); // 可能为 null 或 '' 或实际值
+          let pickedProxyIP = url.searchParams.get('proxyip'); // query 参数优先
           let matchedProxyPath = false;
           const path = url.pathname.toLowerCase();
 
-          // 优先检查严格的路径形式：/proxyip=xxx 或 /proxyip.xxx
+          // 路径匹配：/proxyip=xxx 或 /proxyip.xxx
           if (/\/proxyip=/i.test(path)) {
-            // split 后可能为 undefined，故使用 || '' 兜底
             pickedProxyIP = path.split('/proxyip=')[1] || '';
             matchedProxyPath = true;
           } else if (/\/proxyip\./i.test(path)) {
             pickedProxyIP = `proxyip.${(path.split('/proxyip.')[1] || '')}`;
             matchedProxyPath = true;
-          } else if (/sg\.dtcs520\.com/i.test(path)) {
-            // 特殊路径匹配（不会影响 matchedProxyPath）
+          } else if (/sg.dtcs520.com/i.test(path)) {
+            // 特殊路径匹配
             pickedProxyIP = 'sg.dtcs520.com';
-          } else if (/hk\.dtcs520\.com/i.test(path)) {
+          } else if (/hk.dtcs520.com/i.test(path)) {
             pickedProxyIP = 'hk.dtcs520.com';
-          } else if (/jp\.dtcs520\.com/i.test(path)) {
+          } else if (/jp.dtcs520.com/i.test(path)) {
             pickedProxyIP = 'jp.dtcs520.com';
-          } else if (/us\.dtcs520\.com/i.test(path)) {
+          } else if (/us.dtcs520.com/i.test(path)) {
             pickedProxyIP = 'us.dtcs520.com';
           }
 
-          // 兜底逻辑：仅当前两条路径匹配失败时（matchedProxyPath === false），强制覆盖为默认
-          if (!matchedProxyPath) {
+          // 兜底逻辑：路径没匹配且 query 参数为空
+          if (!matchedProxyPath && !pickedProxyIP) {
             pickedProxyIP = 'sg.dtcs520.com';
           }
 
-          // 最终把局部解析结果写回全局 proxyIP（覆盖全局）
+          // 最终把局部解析结果写回全局 proxyIP（写回全局变量）
           proxyIP = pickedProxyIP;
         }
         // ---------- 替换结束 ----------
