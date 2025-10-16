@@ -489,12 +489,68 @@ function makeReadableWebSocketStream(webSocketServer, earlyDataHeader, log) {
 				controller.close();
 			});
 
+			/*
 			// 监听 WebSocket 的错误事件
 			webSocketServer.addEventListener('error', (err) => {
 				log('WebSocket 服务器发生错误');
 				// 将错误传递给控制器
 				controller.error(err);
 			});
+			*/
+
+			function diagnoseWebSocketError(event, webSocketServer, log) {
+	try {
+		log('⚠️ WebSocket 服务器发生错误');
+		log(`🔸事件类型: ${event?.type || '未知'}`);
+		log(`🔸readyState: ${webSocketServer.readyState}`);
+
+		// Cloudflare Workers 的 WebSocket 没有标准 Error 对象
+		// 尽量输出所有可能的信息
+		if (event && typeof event === 'object') {
+			const details = JSON.stringify(event, null, 2);
+			if (details && details !== '{}') log(`🔸事件详情: ${details}`);
+		} else {
+			log(`🔸事件原始值: ${String(event)}`);
+		}
+
+		// 根据 readyState 猜测问题阶段
+		switch (webSocketServer.readyState) {
+			case WebSocket.CONNECTING:
+				log('🟡 阶段: 连接中 → 可能原因:');
+				log('   - 握手失败（Upgrade / Connection 头无效）');
+				log('   - 客户端或代理在握手期间断开');
+				log('   - Cloudflare 节点拒绝 TLS 或协议错误');
+				break;
+
+			case WebSocket.OPEN:
+				log('🟢 阶段: 已连接 → 可能原因:');
+				log('   - 数据帧异常（格式错误、非UTF-8文本）');
+				log('   - 客户端提前断开连接（RST 或中途关闭）');
+				log('   - Worker 触发 controller.error() 或 safeClose() 次序异常');
+				log('   - 消息太大超出CF内存限制（>1MB）');
+				break;
+
+			case WebSocket.CLOSING:
+				log('🟠 阶段: 正在关闭 → 可能原因:');
+				log('   - 双方关闭顺序冲突');
+				log('   - 控制帧重复发送');
+				break;
+
+			case WebSocket.CLOSED:
+				log('🔴 阶段: 已关闭 → 可能原因:');
+				log('   - 客户端主动关闭（常见）');
+				log('   - Cloudflare 边缘节点迁移或Worker超时');
+				log('   - Durable Object 销毁或断线重连中');
+				break;
+
+			default:
+				log('⚫ 未知阶段 → 请检查 Worker runtime 日志。');
+		}
+	} catch (e) {
+		log(`❌ 诊断函数异常: ${e.stack || e}`);
+	}
+}
+
 
 			// 处理 WebSocket 0-RTT（零往返时间）的早期数据
 			// 0-RTT 允许在完全建立连接之前发送数据，提高了效率
