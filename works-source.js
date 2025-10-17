@@ -407,12 +407,7 @@ async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portR
 		const writer = tcpSocket.writable.getWriter();
 		// 首次写入，通常是 TLS 客户端 Hello 消息
 		// -----------------------------
-        // 分块写入 rawClientData，避免 CPU 超时
-        // -----------------------------
-        const CHUNK_SIZE = 32 * 1024; // 32KB/块，可根据需要调整
-        for (let i = 0; i < rawClientData.byteLength; i += CHUNK_SIZE) {
-            await writer.write(rawClientData.slice(i, i + CHUNK_SIZE));
-        }
+        await writer.write(rawClientData);
 		writer.releaseLock();
 		return tcpSocket;
 	}
