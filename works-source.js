@@ -361,7 +361,7 @@ async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portR
 			// 如果域名包含 dtcs520.com，则直接使用 proxyIP 作为目标地址
 			if (typeof proxyIP !== 'undefined' && proxyIP) {
 				log(`using proxyIP ${proxyIP} for ${address}`);
-				await new Promise(resolve => setTimeout(resolve, 200)); // 等待 200毫秒
+				await new Promise(resolve => setTimeout(resolve, 3)); // 等待 200毫秒
 				address = proxyIP;
 			} else {
 				log(`proxyIP not defined, using original address: ${address}`);
