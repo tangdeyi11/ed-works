@@ -743,6 +743,8 @@ function processVlessHeader(vlessBuffer, userID) {
  * @param {(() => Promise<void>) | null} retry 重试函数，当没有数据时调用
  * @param {*} log 日志函数
  */
+
+/*
 async function remoteSocketToWS(remoteSocket, webSocket, vlessResponseHeader, retry, log) {
 	// 将数据从远程服务器转发到 WebSocket
 	let remoteChunkCount = 0;
@@ -820,6 +822,79 @@ async function remoteSocketToWS(remoteSocket, webSocket, vlessResponseHeader, re
 		retry(); // 调用重试函数，尝试重新建立连接
 	}
 }
+*/
+
+	/**
+ * 将远程 TCP Socket 的数据流转发到 WebSocket
+ * 并记录详细的关闭原因。
+ */
+async function remoteSocketToWS(remoteSocket, webSocket, vlessResponseHeader, retry, log) {
+	let hasIncomingData = false;
+	let vlessHeader = vlessResponseHeader;
+	let closedByRemote = false;
+	let aborted = false;
+	let errorCaught = null;
+
+	try {
+		await remoteSocket.readable.pipeTo(
+			new WritableStream({
+				async write(chunk, controller) {
+					hasIncomingData = true;
+
+					if (webSocket.readyState !== WS_READY_STATE_OPEN) {
+						controller.error('❌ WebSocket 已关闭，无法继续写入');
+						return;
+					}
+
+					try {
+						if (vlessHeader) {
+							await webSocket.send(await new Blob([vlessHeader, chunk]).arrayBuffer());
+							vlessHeader = null;
+						} else {
+							await webSocket.send(chunk);
+						}
+					} catch (err) {
+						controller.error(`❌ 写入 WebSocket 出错: ${err.message || err}`);
+					}
+				},
+
+				close() {
+					closedByRemote = true;
+					const reason = hasIncomingData
+						? '✅ 远程服务器正常关闭（有返回数据）'
+						: '⚠️ 远程服务器提前关闭（无返回数据）';
+					log(`remoteSocket.readable closed → ${reason}`);
+				},
+
+				abort(reason) {
+					aborted = true;
+					log(`❌ remoteSocket.readable aborted: ${reason}`);
+				},
+			})
+		);
+	} catch (err) {
+		errorCaught = err;
+		log(`🚨 remoteSocketToWS 捕获异常: ${err.message || err}`);
+	}
+
+	// ========== 关闭阶段诊断 ==========
+	if (errorCaught) {
+		// 如果捕获异常，通常是 CF runtime 或客户端中止
+		log(`🔎 关闭分析 → 异常触发: ${errorCaught.message || errorCaught}`);
+		safeCloseWebSocket(webSocket);
+	} else if (aborted) {
+		log('🔎 关闭分析 → 流中止（可能客户端断开 WebSocket）');
+		safeCloseWebSocket(webSocket);
+	} else if (!hasIncomingData && closedByRemote) {
+		log('🔎 关闭分析 → 无返回数据即关闭 → 可能远程连接拒绝 / SYN 后立即 FIN / RST');
+		retry && (await retry());
+	} else {
+		log('🔎 关闭分析 → 正常结束，无需重试');
+	}
+}
+
+
+
 
 /**
  * 将 Base64 编码的字符串转换为 ArrayBuffer
