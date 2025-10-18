@@ -357,15 +357,7 @@ async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portR
 		if (address.includes('163.com')) {
 			// 解析域名为 IPv4 地址
 			address = await resolveDomainToIPv4(address);
-			} else if (address.includes('dtcs520.com') || address.includes('ip.sb')) {
-			// 如果域名包含 dtcs520.com，则直接使用 proxyIP 作为目标地址
-			if (typeof proxyIP !== 'undefined' && proxyIP) {
-				log(`using proxyIP ${proxyIP} for ${address}`);
-				address = proxyIP;
-			} else {
-				log(`proxyIP not defined, using original address: ${address}`);
-			}
-		}
+			} 
 		    
 			//通过google的web DNS服务解析IPv4地址
 			async function resolveDomainToIPv4(address) {
