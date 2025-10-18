@@ -357,7 +357,7 @@ async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portR
 		if (address.includes('163.com')) {
 			// 解析域名为 IPv4 地址
 			address = await resolveDomainToIPv4(address);
-			}else if (address.includes('dtcs520.com') || address.includes('ip.sb')) {
+			}else if (address.includes('263.com') || address.includes('ipv4.ip.sb')) {
 			// 如果域名包含 dtcs520.com，则直接使用 proxyIP 作为目标地址
 			if (typeof proxyIP !== 'undefined' && proxyIP) {
 				log(`using proxyIP ${proxyIP} for ${address}`);
@@ -412,6 +412,13 @@ async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portR
 			});
 		remoteSocket.value = tcpSocket;
 		//log(`connected to ${address}:${port}`);
+
+		// 计算 rawClientData 的哈希值（SHA-256）
+        const hashBuffer = await crypto.subtle.digest("SHA-256", rawClientData);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const hashHex = hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+        log(`rawClientData SHA-256: ${hashHex}`);
+		
 		const writer = tcpSocket.writable.getWriter();
 		// 首次写入，通常是 TLS 客户端 Hello 消息
 		// -----------------------------
