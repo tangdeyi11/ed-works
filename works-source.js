@@ -433,61 +433,21 @@ async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portR
 	 * 这可能是因为某些网络问题导致的连接失败
 	 */
 	async function retry() {
-    try {
-        log('🔁 [RETRY] 开始执行重试逻辑');
-
-        // 🧹 1️⃣ 关闭旧 TCP socket，避免重复 close 触发日志
-        if (tcpSocket && tcpSocket.readable && tcpSocket.writable) {
-            try {
-                tcpSocket.writable.close();
-                tcpSocket.readable.cancel();
-                log('🧹 [RETRY] 已关闭旧 tcpSocket');
-            } catch (err) {
-                log('⚠️ [RETRY] 关闭旧 tcpSocket 出错: ' + err);
-            }
-        }
-
-        // 🧩 2️⃣ 检查 WebSocket 状态，如果客户端已断开则跳过 retry
-        if (!webSocket || webSocket.readyState !== 'open') {
-            log('⚠️ [RETRY] 客户端已断开（WebSocket closed），放弃重试');
-            return;
-        }
-
-        // 🔌 3️⃣ 建立新连接
-        tcpSocket = enableSocks
-            ? await connectAndWrite(addressRemote, portRemote, true)
-            : await connectAndWrite(proxyIP || addressRemote, portRemote);
-
-        log(`✅ [RETRY] 新 TCP 连接建立: ${proxyIP || addressRemote}:${portRemote}`);
-
-        // 🚦 4️⃣ 绑定新的 close 事件（只在 WebSocket 仍然打开时）
-        tcpSocket.closed
-            .catch(error => {
-                log('⚠️ [RETRY] tcpSocket.closed 捕获错误: ' + error);
-            })
-            .finally(() => {
-                // 🧠 检查客户端状态，避免重复 safeCloseWebSocket()
-                if (webSocket && webSocket.readyState === 'open') {
-                    log('🔎 [RETRY] tcpSocket 被关闭 → 触发 safeCloseWebSocket()');
-                    safeCloseWebSocket(webSocket);
-                } else {
-                    log('⚠️ [RETRY] tcpSocket 关闭时客户端已断开，跳过 safeCloseWebSocket()');
-                }
-            });
-
-        // 🔄 5️⃣ 建立新的数据流
-        if (webSocket && webSocket.readyState === 'open') {
-            remoteSocketToWS(tcpSocket, webSocket, vlessResponseHeader, null, log);
-            log('🔁 [RETRY] 已建立新的 remoteSocketToWS 数据流');
-        } else {
-            log('⚠️ [RETRY] 客户端已断开，跳过数据流绑定');
-        }
-    } catch (err) {
-        log('❌ [RETRY] 发生异常: ' + err);
+    let tcpSocket;
+    if (enableSocks) {
+      tcpSocket = await connectAndWrite(addressRemote, portRemote, true);
+    } else {
+      tcpSocket = await connectAndWrite(proxyIP || addressRemote, portRemote);
     }
-}
 
+    tcpSocket.closed.catch(error => {
+      console.log('retry tcpSocket closed error', error);
+    }).finally(() => {
+      safeCloseWebSocket(webSocket);
+    });
 
+    remoteSocketToWS(tcpSocket, webSocket, vlxxxResponseHeader, null, log);
+  }
 
 	// 首次尝试连接远程服务器
 	let tcpSocket = await connectAndWrite(addressRemote, portRemote);
@@ -538,69 +498,13 @@ function makeReadableWebSocketStream(webSocketServer, earlyDataHeader, log) {
 				controller.close();
 			});
 
-			/*
 			// 监听 WebSocket 的错误事件
 			webSocketServer.addEventListener('error', (err) => {
 				log('WebSocket 服务器发生错误');
 				// 将错误传递给控制器
 				controller.error(err);
 			});
-			*/
-
-			function diagnoseWebSocketError(event, webSocketServer, log) {
-	try {
-		log('⚠️ WebSocket 服务器发生错误');
-		log(`🔸事件类型: ${event?.type || '未知'}`);
-		log(`🔸readyState: ${webSocketServer.readyState}`);
-
-		// Cloudflare Workers 的 WebSocket 没有标准 Error 对象
-		// 尽量输出所有可能的信息
-		if (event && typeof event === 'object') {
-			const details = JSON.stringify(event, null, 2);
-			if (details && details !== '{}') log(`🔸事件详情: ${details}`);
-		} else {
-			log(`🔸事件原始值: ${String(event)}`);
-		}
-
-		// 根据 readyState 猜测问题阶段
-		switch (webSocketServer.readyState) {
-			case WebSocket.CONNECTING:
-				log('🟡 阶段: 连接中 → 可能原因:');
-				log('   - 握手失败（Upgrade / Connection 头无效）');
-				log('   - 客户端或代理在握手期间断开');
-				log('   - Cloudflare 节点拒绝 TLS 或协议错误');
-				break;
-
-			case WebSocket.OPEN:
-				log('🟢 阶段: 已连接 → 可能原因:');
-				log('   - 数据帧异常（格式错误、非UTF-8文本）');
-				log('   - 客户端提前断开连接（RST 或中途关闭）');
-				log('   - Worker 触发 controller.error() 或 safeClose() 次序异常');
-				log('   - 消息太大超出CF内存限制（>1MB）');
-				break;
-
-			case WebSocket.CLOSING:
-				log('🟠 阶段: 正在关闭 → 可能原因:');
-				log('   - 双方关闭顺序冲突');
-				log('   - 控制帧重复发送');
-				break;
-
-			case WebSocket.CLOSED:
-				log('🔴 阶段: 已关闭 → 可能原因:');
-				log('   - 客户端主动关闭（常见）');
-				log('   - Cloudflare 边缘节点迁移或Worker超时');
-				log('   - Durable Object 销毁或断线重连中');
-				break;
-
-			default:
-				log('⚫ 未知阶段 → 请检查 Worker runtime 日志。');
-		}
-	} catch (e) {
-		log(`❌ 诊断函数异常: ${e.stack || e}`);
-	}
-}
-
-
+			
 			// 处理 WebSocket 0-RTT（零往返时间）的早期数据
 			// 0-RTT 允许在完全建立连接之前发送数据，提高了效率
 			const { earlyData, error } = base64ToArrayBuffer(earlyDataHeader);
