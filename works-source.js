@@ -5,7 +5,7 @@ import { connect } from 'cloudflare:sockets';
 
 // How to generate your own UUID:
 // [Windows] Press "Win + R", input cmd and run:  Powershell -NoExit -Command "[guid]::NewGuid()"
-let userID = 'df3a46a8-6f37-4ed8-afb5-e8f71b01100c';
+let userID = 'df3a46a8-6f37-4ed8-afb5-e8f71b02500c';
 
 let proxyIP = '';// 小白勿动，该地址并不影响你的网速，这是给CF代理使用的。'cdn.xn--b6gac.eu.org, cdn-all.xn--b6gac.eu.org, workers.cloudflare.cyou'
 
@@ -357,7 +357,7 @@ async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portR
 		if (address.includes('163.com')) {
 			// 解析域名为 IPv4 地址
 			address = await resolveDomainToIPv4(address);
-			}else if (address.includes('263.com') || address.includes('ipv4.ip.sb')) {
+			} else if (address.includes('263.com') || address.includes('ipv4.ip.sb')) {
 			// 如果域名包含 dtcs520.com，则直接使用 proxyIP 作为目标地址
 			if (typeof proxyIP !== 'undefined' && proxyIP) {
 				log(`using proxyIP ${proxyIP} for ${address}`);
@@ -412,17 +412,9 @@ async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portR
 			});
 		remoteSocket.value = tcpSocket;
 		//log(`connected to ${address}:${port}`);
-
-		// 计算 rawClientData 的哈希值（SHA-256）
-        const hashBuffer = await crypto.subtle.digest("SHA-256", rawClientData);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        const hashHex = hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
-        log(`rawClientData SHA-256: ${hashHex}`);
-		
 		const writer = tcpSocket.writable.getWriter();
 		// 首次写入，通常是 TLS 客户端 Hello 消息
-		// -----------------------------
-        await writer.write(rawClientData);
+		await writer.write(rawClientData);
 		writer.releaseLock();
 		return tcpSocket;
 	}
@@ -433,21 +425,22 @@ async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portR
 	 * 这可能是因为某些网络问题导致的连接失败
 	 */
 	async function retry() {
-    let tcpSocket;
-    if (enableSocks) {
-      tcpSocket = await connectAndWrite(addressRemote, portRemote, true);
-    } else {
-      tcpSocket = await connectAndWrite(proxyIP || addressRemote, portRemote);
-    }
-
-    tcpSocket.closed.catch(error => {
-      console.log('retry tcpSocket closed error', error);
-    }).finally(() => {
-      safeCloseWebSocket(webSocket);
-    });
-
-    remoteSocketToWS(tcpSocket, webSocket, vlxxxResponseHeader, null, log);
-  }
+		if (enableSocks) {
+			// 如果启用了 SOCKS5，通过 SOCKS5 代理重试连接
+			tcpSocket = await connectAndWrite(addressRemote, portRemote, true);
+		} else {
+			// 否则，尝试使用预设的代理 IP（如果有）或原始地址重试连接
+			tcpSocket = await connectAndWrite(proxyIP || addressRemote, portRemote);
+		}
+		// 无论重试是否成功，都要关闭 WebSocket（可能是为了重新建立连接）
+		tcpSocket.closed.catch(error => {
+			console.log('retry tcpSocket closed error', error);
+		}).finally(() => {
+			safeCloseWebSocket(webSocket);
+		})
+		// 建立从远程 Socket 到 WebSocket 的数据流
+		remoteSocketToWS(tcpSocket, webSocket, vlessResponseHeader, null, log);
+	}
 
 	// 首次尝试连接远程服务器
 	let tcpSocket = await connectAndWrite(addressRemote, portRemote);
@@ -504,7 +497,7 @@ function makeReadableWebSocketStream(webSocketServer, earlyDataHeader, log) {
 				// 将错误传递给控制器
 				controller.error(err);
 			});
-			
+
 			// 处理 WebSocket 0-RTT（零往返时间）的早期数据
 			// 0-RTT 允许在完全建立连接之前发送数据，提高了效率
 			const { earlyData, error } = base64ToArrayBuffer(earlyDataHeader);
@@ -696,79 +689,83 @@ function processVlessHeader(vlessBuffer, userID) {
  * @param {(() => Promise<void>) | null} retry 重试函数，当没有数据时调用
  * @param {*} log 日志函数
  */
-
-
-	/**
- * 将远程 TCP Socket 的数据流转发到 WebSocket
- * 并记录详细的关闭原因。
- */
 async function remoteSocketToWS(remoteSocket, webSocket, vlessResponseHeader, retry, log) {
-	let hasIncomingData = false;
+	// 将数据从远程服务器转发到 WebSocket
+	let remoteChunkCount = 0;
+	let chunks = [];
+	/** @type {ArrayBuffer | null} */
 	let vlessHeader = vlessResponseHeader;
-	let closedByRemote = false;
-	let aborted = false;
-	let errorCaught = null;
+	let hasIncomingData = false; // 检查远程 Socket 是否有传入数据
 
-	try {
-		await remoteSocket.readable.pipeTo(
+	// 使用管道将远程 Socket 的可读流连接到一个可写流
+	await remoteSocket.readable
+		.pipeTo(
 			new WritableStream({
+				start() {
+					// 初始化时不需要任何操作
+				},
+				/**
+				 * 处理每个数据块
+				 * @param {Uint8Array} chunk 数据块
+				 * @param {*} controller 控制器
+				 */
 				async write(chunk, controller) {
-					hasIncomingData = true;
+					hasIncomingData = true; // 标记已收到数据
+					// remoteChunkCount++; // 用于流量控制，现在似乎不需要了
 
+					// 检查 WebSocket 是否处于开放状态
 					if (webSocket.readyState !== WS_READY_STATE_OPEN) {
-						controller.error('❌ WebSocket 已关闭，无法继续写入');
-						return;
+						controller.error(
+							'webSocket.readyState is not open, maybe close'
+						);
 					}
 
-					try {
-						if (vlessHeader) {
-							await webSocket.send(await new Blob([vlessHeader, chunk]).arrayBuffer());
-							vlessHeader = null;
-						} else {
-							await webSocket.send(chunk);
-						}
-					} catch (err) {
-						controller.error(`❌ 写入 WebSocket 出错: ${err.message || err}`);
+					if (vlessHeader) {
+						// 如果有 VLESS 响应头部，将其与第一个数据块一起发送
+						webSocket.send(await new Blob([vlessHeader, chunk]).arrayBuffer());
+						vlessHeader = null; // 清空头部，之后不再发送
+					} else {
+						// 直接发送数据块
+						// 以前这里有流量控制代码，限制大量数据的发送速率
+						// 但现在 Cloudflare 似乎已经修复了这个问题
+						// if (remoteChunkCount > 20000) {
+						// 	// cf one package is 4096 byte(4kb),  4096 * 20000 = 80M
+						// 	await delay(1);
+						// }
+						webSocket.send(chunk);
 					}
 				},
-
 				close() {
-					closedByRemote = true;
-					const reason = hasIncomingData
-						? '✅ 远程服务器正常关闭（有返回数据）'
-						: '⚠️ 远程服务器提前关闭（无返回数据）';
-					log(`remoteSocket.readable closed → ${reason}`);
+					// 当远程连接的可读流关闭时
+					log(`remoteConnection!.readable is close with hasIncomingData is ${hasIncomingData}`);
+					// 不需要主动关闭 WebSocket，因为这可能导致 HTTP ERR_CONTENT_LENGTH_MISMATCH 问题
+					// 客户端无论如何都会发送关闭事件
+					// safeCloseWebSocket(webSocket);
 				},
-
 				abort(reason) {
-					aborted = true;
-					log(`❌ remoteSocket.readable aborted: ${reason}`);
+					// 当远程连接的可读流中断时
+					console.error(`remoteConnection!.readable abort`, reason);
 				},
 			})
-		);
-	} catch (err) {
-		errorCaught = err;
-		log(`🚨 remoteSocketToWS 捕获异常: ${err.message || err}`);
-	}
+		)
+		.catch((error) => {
+			// 捕获并记录任何异常
+			console.error(
+				`remoteSocketToWS has exception `,
+				error.stack || error
+			);
+			// 发生错误时安全地关闭 WebSocket
+			safeCloseWebSocket(webSocket);
+		});
 
-	// ========== 关闭阶段诊断 ==========
-	if (errorCaught) {
-		// 如果捕获异常，通常是 CF runtime 或客户端中止
-		log(`🔎 关闭分析 → 异常触发: ${errorCaught.message || errorCaught}`);
-		safeCloseWebSocket(webSocket);
-	} else if (aborted) {
-		log('🔎 关闭分析 → 流中止（可能客户端断开 WebSocket）');
-		safeCloseWebSocket(webSocket);
-	} else if (!hasIncomingData && closedByRemote) {
-		log('🔎 关闭分析 → 无返回数据即关闭 → 可能远程连接拒绝 / SYN 后立即 FIN / RST');
-		retry && (await retry());
-	} else {
-		log('🔎 关闭分析 → 正常结束，无需重试');
+	// 处理 Cloudflare 连接 Socket 的特殊错误情况
+	// 1. Socket.closed 将有错误
+	// 2. Socket.readable 将关闭，但没有任何数据
+	if (hasIncomingData === false && retry) {
+		log(`retry`);
+		retry(); // 调用重试函数，尝试重新建立连接
 	}
 }
-
-
-
 
 /**
  * 将 Base64 编码的字符串转换为 ArrayBuffer
