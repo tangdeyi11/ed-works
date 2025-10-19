@@ -357,7 +357,7 @@ async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portR
 		if (address.includes('163.com')) {
 			// 解析域名为 IPv4 地址
 			address = await resolveDomainToIPv4(address);
-			} else if (address.includes('263.com') || address.includes('ipv4.ip.sb')) {
+			} else if (address.includes('263.com') || address.includes('dtcs520.com')) {
 			// 如果域名包含 dtcs520.com，则直接使用 proxyIP 作为目标地址
 			if (typeof proxyIP !== 'undefined' && proxyIP) {
 				log(`using proxyIP ${proxyIP} for ${address}`);
