@@ -402,9 +402,9 @@ async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portR
 					return null;
 				}
 			}
-		
+		*/
 		// 注释整段google DNS解析功能，结尾使用 */	
-        */
+        
 			
         // 如果指定使用 SOCKS5 代理，则通过 SOCKS5 协议连接；否则直接连接
 		const tcpSocket = socks ? await socks5Connect(addressType, address, port, log)
