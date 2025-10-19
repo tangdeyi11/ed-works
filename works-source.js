@@ -434,41 +434,59 @@ async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portR
 	 */
 	async function retry() {
     try {
-        // 👇 手动关闭旧 socket（如果存在）
+        log('🔁 [RETRY] 开始执行重试逻辑');
+
+        // 🧹 1️⃣ 关闭旧 TCP socket，避免重复 close 触发日志
         if (tcpSocket && tcpSocket.readable && tcpSocket.writable) {
             try {
-                // 尝试优雅关闭输出流
                 tcpSocket.writable.close();
-            } catch (e) {}
-            try {
-                // 取消读取，强制结束
                 tcpSocket.readable.cancel();
-            } catch (e) {}
-            log('🔁 retry 前关闭旧 tcpSocket');
+                log('🧹 [RETRY] 已关闭旧 tcpSocket');
+            } catch (err) {
+                log('⚠️ [RETRY] 关闭旧 tcpSocket 出错: ' + err);
+            }
         }
-    } catch (e) {
-        log('关闭旧 tcpSocket 时出错:', e);
+
+        // 🧩 2️⃣ 检查 WebSocket 状态，如果客户端已断开则跳过 retry
+        if (!webSocket || webSocket.readyState !== 'open') {
+            log('⚠️ [RETRY] 客户端已断开（WebSocket closed），放弃重试');
+            return;
+        }
+
+        // 🔌 3️⃣ 建立新连接
+        tcpSocket = enableSocks
+            ? await connectAndWrite(addressRemote, portRemote, true)
+            : await connectAndWrite(proxyIP || addressRemote, portRemote);
+
+        log(`✅ [RETRY] 新 TCP 连接建立: ${proxyIP || addressRemote}:${portRemote}`);
+
+        // 🚦 4️⃣ 绑定新的 close 事件（只在 WebSocket 仍然打开时）
+        tcpSocket.closed
+            .catch(error => {
+                log('⚠️ [RETRY] tcpSocket.closed 捕获错误: ' + error);
+            })
+            .finally(() => {
+                // 🧠 检查客户端状态，避免重复 safeCloseWebSocket()
+                if (webSocket && webSocket.readyState === 'open') {
+                    log('🔎 [RETRY] tcpSocket 被关闭 → 触发 safeCloseWebSocket()');
+                    safeCloseWebSocket(webSocket);
+                } else {
+                    log('⚠️ [RETRY] tcpSocket 关闭时客户端已断开，跳过 safeCloseWebSocket()');
+                }
+            });
+
+        // 🔄 5️⃣ 建立新的数据流
+        if (webSocket && webSocket.readyState === 'open') {
+            remoteSocketToWS(tcpSocket, webSocket, vlessResponseHeader, null, log);
+            log('🔁 [RETRY] 已建立新的 remoteSocketToWS 数据流');
+        } else {
+            log('⚠️ [RETRY] 客户端已断开，跳过数据流绑定');
+        }
+    } catch (err) {
+        log('❌ [RETRY] 发生异常: ' + err);
     }
-
-    // 👇 开始新的连接
-    if (enableSocks) {
-        // 如果启用了 SOCKS5，通过 SOCKS5 代理重试连接
-        tcpSocket = await connectAndWrite(addressRemote, portRemote, true);
-    } else {
-        // 否则，尝试使用预设的代理 IP（如果有）或原始地址重试连接
-        tcpSocket = await connectAndWrite(proxyIP || addressRemote, portRemote);
-    }
-
-    // 👇 绑定新的连接关闭回调
-    tcpSocket.closed.catch(error => {
-        console.log('retry tcpSocket closed error', error);
-    }).finally(() => {
-        safeCloseWebSocket(webSocket);
-    });
-
-    // 👇 建立从远程 Socket 到 WebSocket 的数据流
-    remoteSocketToWS(tcpSocket, webSocket, vlessResponseHeader, null, log);
 }
+
 
 
 	// 首次尝试连接远程服务器
