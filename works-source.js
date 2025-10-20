@@ -427,6 +427,12 @@ async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portR
 	 * 这可能是因为某些网络问题导致的连接失败
 	 */
 	async function retry() {
+		
+		if (await waitWebSocketClose(webSocket, 500)) {
+        log("⚠️ WebSocket 已关闭（检测到异常断开），放弃 retry");
+        return; // 直接退出 retry，不再重试
+    }
+		
 		if (enableSocks) {
 			// 如果启用了 SOCKS5，通过 SOCKS5 代理重试连接
 			tcpSocket = await connectAndWrite(addressRemote, portRemote, true);
