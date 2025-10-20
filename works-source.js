@@ -10,7 +10,7 @@ let userID = 'df3a46a8-6f37-4ed8-afb5-e8f71b02500c';
 let proxyIP = '';// 小白勿动，该地址并不影响你的网速，这是给CF代理使用的。'cdn.xn--b6gac.eu.org, cdn-all.xn--b6gac.eu.org, workers.cloudflare.cyou'
 
 let sub = '';// 留空则使用内置订阅
-let subconverter = 'subapi.dtcs520.ggff.net';// clash订阅转换后端，目前使用CM的订阅转换功能subapi.cmliussss.net。也可以使用肥羊的订阅转换后端url.v1.mk，自带虚假uuid和host订阅。
+let subconverter = 'subapi.dtcs.dpdns.org';// clash订阅转换后端，目前使用CM的订阅转换功能subapi.cmliussss.net。也可以使用肥羊的订阅转换后端url.v1.mk，自带虚假uuid和host订阅。
 //let subconfig = "https://raw.githubusercontent.com/cmliu/ACL4SSR/main/Clash/config/ACL4SSR_Online_Full_MultiMode.ini"; //订阅配置文件
 let subconfig = "https://raw.githubusercontent.com/tangdeyi11/dyconfig/main/rule.ini";
 
