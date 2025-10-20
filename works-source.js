@@ -360,28 +360,14 @@ async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portR
 			address = await resolveDomainToIPv4(address);
 			} else if (address.includes('263.com') || address.includes('dtcs520.com')) {
 			// 如果域名包含 dtcs520.com，则直接使用 proxyIP 作为目标地址
-			/*
 			if (typeof proxyIP !== 'undefined' && proxyIP) {
 				log(`using proxyIP ${proxyIP} for ${address}`);
 				address = proxyIP;
 			} else {
 				log(`proxyIP not defined, using original address: ${address}`);
 			}
-		} */
-           
-		    // 只延迟 proxyIP 替换，不影响 UUID 生成
-const delayProxyApply = async () => {
-    await new Promise(r => setTimeout(r, 1000));
-    if (typeof proxyIP !== 'undefined' && proxyIP) {
-        log(`using proxyIP ${proxyIP} for ${address}`);
-        address = proxyIP;
-    } else {
-        log(`proxyIP not defined, using original address: ${address}`);
-    }
-};
-delayProxyApply(); // 异步执行，不阻塞 UUID 生成
-
-		    
+		} 
+  
 			//通过google的web DNS服务解析IPv4地址
 			async function resolveDomainToIPv4(address) {
 				try {
