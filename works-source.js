@@ -645,82 +645,82 @@ function processVlessHeader(vlessBuffer, userID) {
  * @param {(() => Promise<void>) | null} retry 重试函数，当没有数据时调用
  * @param {*} log 日志函数
  */
-async function remoteSocketToWS(remoteSocket, webSocket, vlessResponseHeader, retry, log) {
-	// 将数据从远程服务器转发到 WebSocket
-	let remoteChunkCount = 0;
-	let chunks = [];
-	/** @type {ArrayBuffer | null} */
-	let vlessHeader = vlessResponseHeader;
-	let hasIncomingData = false; // 检查远程 Socket 是否有传入数据
+async function handleTCPOutBound(
+  remoteSocket,
+  addressType,
+  addressRemote,
+  portRemote,
+  rawClientData,
+  webSocket,
+  vlessResponseHeader,
+  log
+) {
+  async function connectAndWrite(address, port, socks = false) {
+    const tcpSocket = socks
+      ? await socks5Connect(addressType, address, port, log)
+      : await connect({ hostname: address, port });
 
-	// 使用管道将远程 Socket 的可读流连接到一个可写流
-	await remoteSocket.readable
-		.pipeTo(
-			new WritableStream({
-				start() {
-					// 初始化时不需要任何操作
-				},
-				/**
-				 * 处理每个数据块
-				 * @param {Uint8Array} chunk 数据块
-				 * @param {*} controller 控制器
-				 */
-				async write(chunk, controller) {
-					hasIncomingData = true; // 标记已收到数据
-					// remoteChunkCount++; // 用于流量控制，现在似乎不需要了
+    remoteSocket.value = tcpSocket;
 
-					// 检查 WebSocket 是否处于开放状态
-					if (webSocket.readyState !== WS_READY_STATE_OPEN) {
-						controller.error(
-							'webSocket.readyState is not open, maybe close'
-						);
-					}
+    const writer = tcpSocket.writable.getWriter();
+    await writer.write(rawClientData);
+    writer.releaseLock();
 
-					if (vlessHeader) {
-						// 如果有 VLESS 响应头部，将其与第一个数据块一起发送
-						webSocket.send(await new Blob([vlessHeader, chunk]).arrayBuffer());
-						vlessHeader = null; // 清空头部，之后不再发送
-					} else {
-						// 直接发送数据块
-						// 以前这里有流量控制代码，限制大量数据的发送速率
-						// 但现在 Cloudflare 似乎已经修复了这个问题
-						// if (remoteChunkCount > 20000) {
-						// 	// cf one package is 4096 byte(4kb),  4096 * 20000 = 80M
-						// 	await delay(1);
-						// }
-						webSocket.send(chunk);
-					}
-				},
-				close() {
-					// 当远程连接的可读流关闭时
-					log(`remoteConnection!.readable is close with hasIncomingData is ${hasIncomingData}`);
-					// 不需要主动关闭 WebSocket，因为这可能导致 HTTP ERR_CONTENT_LENGTH_MISMATCH 问题
-					// 客户端无论如何都会发送关闭事件
-					// safeCloseWebSocket(webSocket);
-				},
-				abort(reason) {
-					// 当远程连接的可读流中断时
-					console.error(`remoteConnection!.readable abort`, reason);
-				},
-			})
-		)
-		.catch((error) => {
-			// 捕获并记录任何异常
-			console.error(
-				`remoteSocketToWS has exception `,
-				error.stack || error
-			);
-			// 发生错误时安全地关闭 WebSocket
-			safeCloseWebSocket(webSocket);
-		});
+    return tcpSocket;
+  }
 
-	// 处理 Cloudflare 连接 Socket 的特殊错误情况
-	// 1. Socket.closed 将有错误
-	// 2. Socket.readable 将关闭，但没有任何数据
-	if (hasIncomingData === false && retry) {
-		log(`retry`);
-		retry(); // 调用重试函数，尝试重新建立连接
-	}
+  async function safePipeTCPtoWS(tcpSocket, webSocket, vlessHeader, onRetry) {
+    let hasData = false;
+
+    try {
+      const reader = tcpSocket.readable.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        hasData = true;
+
+        if (webSocket.readyState === WebSocket.OPEN) {
+          await webSocket.send(value);
+        } else {
+          log('WS 已关闭，丢弃 TCP 数据');
+          break;
+        }
+      }
+    } catch (err) {
+      log('pipeTo WS error', err);
+    } finally {
+      reader.releaseLock();
+      // 如果没有收到任何数据，则触发 retry
+      if (!hasData && typeof onRetry === 'function') {
+        log('Retrying TCP connection...');
+        try {
+          await onRetry();
+        } catch (e) {
+          log('Retry failed:', e.message || e);
+        }
+      }
+      safeCloseWebSocket(webSocket);
+      tcpSocket.close().catch(() => {});
+    }
+  }
+
+  async function retry() {
+    let tcp;
+    if (enableSocks) {
+      tcp = await connectAndWrite(addressRemote, portRemote, true);
+    } else {
+      tcp = await connectAndWrite(proxyIP || addressRemote, portRemote);
+    }
+
+    tcp.closed.catch((err) => log('retry tcpSocket closed error', err));
+
+    safePipeTCPtoWS(tcp, webSocket, vlessResponseHeader, null);
+  }
+
+  const tcpSocket = await connectAndWrite(addressRemote, portRemote);
+
+  // 建立安全流
+  safePipeTCPtoWS(tcpSocket, webSocket, vlessResponseHeader, retry);
 }
 
 /**
