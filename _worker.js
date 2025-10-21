@@ -1,832 +1,547 @@
-// Optimized Cloudflare Worker (VLXXX) - refactored and renamed vless/VLESS -> vlxxx/VLXXX
-// Based on user's original code. Some external integrations (account APIs, subscription backends)
-// are stubbed with minimal implementations to keep this file self-contained for testing.
-
-// @ts-ignore
 import { connect } from 'cloudflare:sockets';
 
-// -------------------------------
-// Configuration / Defaults
-// -------------------------------
-let userID = 'df3a46a8-6f37-4ed8-afb5-e8f71b02500c';
+let userID = '';
 let proxyIP = '';
-let sub = '';
-let subconverter = 'subapi.dtcs.dpdns.org';
-let subconfig = "https://raw.githubusercontent.com/tangdeyi11/dyconfig/main/rule.ini";
+//let sub = '';
+let subConverter = atob('U3ViQXBpLkNtbGlVc3NzUy5OZXQ=');
+let subConfig = atob('aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL0FDTDRTU1IvQUNMNFNTUi9tYXN0ZXIvQ2xhc2gvY29uZmlnL0FDTDRTU1JfT25saW5lX01pbmlfTXVsdGlNb2RlLmluaQ==');
+let subProtocol = 'https';
+let subEmoji = 'true';
 let socks5Address = '';
-let fakeUserID;
-let fakeHostName;
+let enableSocks = false;
+let enableHttp = false;
 let noTLS = 'false';
-const expire = 4102329600; // 2099-12-31
+const expire = 4102329600;//2099-12-31
 let proxyIPs;
+let socks5s;
+let go2Socks5s = [
+    '*tapecontent.net',
+    '*cloudatacdn.com',
+    '*.loadshare.org',
+];
 let addresses = [];
 let addressesapi = [];
 let addressesnotls = [];
 let addressesnotlsapi = [];
 let addressescsv = [];
 let DLS = 8;
-let FileName = 'edgetunnel';
-let BotToken = '';
-let ChatID = '';
+let remarkIndex = 1;//CSV备注所在列偏移量
+let FileName = atob('ZWRnZXR1bm5lbA==');
+let BotToken;
+let ChatID;
 let proxyhosts = [];
-let proxyhostsURL = '';
-let RproxyIP = 'false';
-let enableSocks = false;
-let parsedSocks5Address = {};
+let proxyhostsURL;
+let 请求CF反代IP = 'false';
+const httpPorts = ["8080", "8880", "2052", "2082", "2086", "2095"];
+let httpsPorts = ["2053", "2083", "2087", "2096", "8443"];
+let 有效时间 = 30;
+let 更新时间 = 3;
+let userIDLow;
+let userIDTime = "";
+let proxyIPPool = [];
+let path = '/?ed=2560';
+let 动态UUID = userID;
+let link = [];
+let banHosts = [atob('c3BlZWQuY2xvdWRmbGFyZS5jb20=')];
+let SCV = 'true';
+let allowInsecure = '&allowInsecure=1';
 
-// -------------------------------
-// Exported fetch handler
-// -------------------------------
+
+
 export default {
-  /**
-   * @param {Request} request
-   * @param {*} env
-   * @param {*} ctx
-   */
-  async fetch(request, env, ctx) {
-    try {
-	  // -------------------- 新增 /debug 分支 --------------------
-	  // 下一句需要拿到请求的路径 (pathname) 来判断是否访问了 /debug
-	  const url = new URL(request.url);
-      
-      // -------------------- 新增 /debug 分支 --------------------
-      if (url.pathname.toLowerCase() === '/debug') {
-        const rayHeader = request.headers.get("cf-ray");
-        const entryColo = rayHeader ? rayHeader.split("-")[1] : "unknown";
-        const execColo = request.cf?.colo || "unknown";
-
-        const match = (entryColo === execColo) ? "一致 ✅" : "不一致 ⚠️";
-
-        const debugInfo = {
-          entryColo,   // 请求入口节点
-          execColo,    // 实际执行节点
-          result: match,
-          country: request.cf?.country,
-          city: request.cf?.city,
-          asn: request.cf?.asn,
-          timezone: request.cf?.timezone,
-          ua: request.headers.get('User-Agent')
-        };
-
-        return new Response(JSON.stringify(debugInfo, null, 2), {
-          status: 200,
-          headers: { "Content-Type": "application/json;charset=utf-8" }
-        });
-      }
-      // -------------------- /debug 分支结束 --------------------
-		
-      const UA = request.headers.get('User-Agent') || 'null';
-      const userAgent = UA.toLowerCase();
-      userID = (env.UUID || userID).toLowerCase();
-
-      // generate daily fake ids
-      const currentDate = new Date();
-      currentDate.setHours(0, 0, 0, 0);
-      const timestamp = Math.ceil(currentDate.getTime() / 1000);
-      const fakeUserIDMD5 = await MD5MD5(`${userID}${timestamp}`);
-      fakeUserID = fakeUserIDMD5.slice(0, 8) + "-" + fakeUserIDMD5.slice(8, 12) + "-" + fakeUserIDMD5.slice(12, 16) + "-" + fakeUserIDMD5.slice(16, 20) + "-" + fakeUserIDMD5.slice(20);
-      fakeHostName = fakeUserIDMD5.slice(6, 9) + "." + fakeUserIDMD5.slice(13, 19);
-
-      proxyIP = env.PROXYIP || proxyIP;
-      proxyIPs = proxyIP ? await ADD(proxyIP) : [];
-      proxyIP = proxyIPs && proxyIPs.length ? proxyIPs[Math.floor(Math.random() * proxyIPs.length)] : proxyIP;
-
-      socks5Address = env.SOCKS5 || socks5Address;
-      sub = env.SUB || sub;
-      subconverter = env.SUBAPI || subconverter;
-      subconfig = env.SUBCONFIG || subconfig;
-
-      // socks parsing
-      if (socks5Address) {
+    async fetch(request, env, ctx) {
         try {
-          parsedSocks5Address = socks5AddressParser(socks5Address);
-          RproxyIP = env.RPROXYIP || 'false';
-          enableSocks = true;
-        } catch (err) {
-          console.log(err.toString());
-          RproxyIP = env.RPROXYIP || (!proxyIP ? 'true' : 'false');
-          enableSocks = false;
-        }
-      } else {
-        RproxyIP = env.RPROXYIP || (!proxyIP ? 'true' : 'false');
-      }
+            const UA = request.headers.get('User-Agent') || 'null';
+            const userAgent = UA.toLowerCase();
+            userID = env.UUID || env.uuid || env.PASSWORD || env.pswd || userID;
+            if (env.KEY || env.TOKEN || (userID && !isValidUUID(userID))) {
+                动态UUID = env.KEY || env.TOKEN || userID;
+                有效时间 = Number(env.TIME) || 有效时间;
+                更新时间 = Number(env.UPTIME) || 更新时间;
+                const userIDs = await 生成动态UUID(动态UUID);
+                userID = userIDs[0];
+                userIDLow = userIDs[1];
+            } else 动态UUID = userID;
 
-      if (env.ADD) addresses = await ADD(env.ADD);
-      if (env.ADDAPI) addressesapi = await ADD(env.ADDAPI);
-      if (env.ADDNOTLS) addressesnotls = await ADD(env.ADDNOTLS);
-      if (env.ADDNOTLSAPI) addressesnotlsapi = await ADD(env.ADDNOTLSAPI);
-      if (env.ADDCSV) addressescsv = await ADD(env.ADDCSV);
-      DLS = env.DLS || DLS;
-      BotToken = env.TGTOKEN || BotToken;
-      ChatID = env.TGID || ChatID;
-
-      const upgradeHeader = request.headers.get('Upgrade');
-      //const url = new URL(request.url);
-      if (url.searchParams.has('notls')) noTLS = 'true';
-
-      if (!upgradeHeader || upgradeHeader !== 'websocket') {
-        // HTTP routes
-        switch (url.pathname.toLowerCase()) {
-          case '/': {
-            const envKey = env.URL302 ? 'URL302' : (env.URL ? 'URL' : null);
-            if (envKey) {
-              const URLs = await ADD(env[envKey]);
-              const URL = URLs[Math.floor(Math.random() * URLs.length)];
-              return envKey === 'URL302' ? Response.redirect(URL, 302) : fetch(new Request(URL, request));
+            if (!userID) {
+                return new Response('请设置你的UUID变量，或尝试重试部署，检查变量是否生效？', {
+                    status: 404,
+                    headers: {
+                        "Content-Type": "text/plain;charset=utf-8",
+                    }
+                });
             }
-            return new Response('系统维护中........', { status: 404, headers: { "Content-Type": "text/plain;charset=utf-8" } });
-          }
-          case `/${fakeUserID}`: {
-            const fakeConfig = await getVLXXXConfig(userID, request.headers.get('Host'), sub, 'CF-Workers-SUB', RproxyIP, url);
-            return new Response(`${fakeConfig}`, { status: 200 });
-          }
-          case `/${userID}`: {
-            // telemetry (safe noop if sendMessage undefined)
-            await sendMessage(`#获取订阅 ${FileName}`, request.headers.get('CF-Connecting-IP'), `UA: ${UA}\n域名: ${url.hostname}\n入口: ${url.pathname + url.search}`);
+            const currentDate = new Date();
+            currentDate.setHours(0, 0, 0, 0);
+            const timestamp = Math.ceil(currentDate.getTime() / 1000);
+            const fakeUserIDMD5 = await 双重哈希(`${userID}${timestamp}`);
+            const fakeUserID = [
+                fakeUserIDMD5.slice(0, 8),
+                fakeUserIDMD5.slice(8, 12),
+                fakeUserIDMD5.slice(12, 16),
+                fakeUserIDMD5.slice(16, 20),
+                fakeUserIDMD5.slice(20)
+            ].join('-');
 
-            if ((!sub || sub == '') && (addresses.length + addressesapi.length + addressesnotls.length + addressesnotlsapi.length + addressescsv.length) == 0) {
-              if (request.headers.get('Host').includes('.workers.dev')) {
-                sub = 'end.dtcs520.com';
-                subconfig = 'https://raw.githubusercontent.com/tangdeyi11/dyconfig/main/rule.ini';
-              } else sub = 'end.dtcs520.com';
-            }
+            const fakeHostName = `${fakeUserIDMD5.slice(6, 9)}.${fakeUserIDMD5.slice(13, 19)}`;
 
-            const vlxxxConfig = await getVLXXXConfig(userID, request.headers.get('Host'), sub, UA, RproxyIP, url);
-
-            const now = Date.now();
-            const today = new Date(now);
-            today.setHours(0, 0, 0, 0);
-            const UD = Math.floor(((now - today.getTime()) / 86400000) * 24 * 1099511627776 / 2);
-            let pagesSum = UD;
-            let workersSum = UD;
-            let total = 24 * 1099511627776;
-
-            if (env.CFEMAIL && env.CFKEY) {
-              const email = env.CFEMAIL;
-              const key = env.CFKEY;
-              const accountIndex = env.CFID || 0;
-              const accountId = await getAccountId(email, key);
-              if (accountId) {
-                const nowDate = new Date();
-                nowDate.setUTCHours(0, 0, 0, 0);
-                const startDate = nowDate.toISOString();
-                const endDate = new Date().toISOString();
-                const Sum = await getSum(accountId, accountIndex, email, key, startDate, endDate);
-                pagesSum = Sum[0];
-                workersSum = Sum[1];
-                total = 102400;
-              }
-            }
-
-            const headers = {
-              "Content-Type": "text/plain;charset=utf-8",
-              "Profile-Update-Interval": "6",
-              "Subscription-Userinfo": `upload=${pagesSum}; download=${workersSum}; total=${total}; expire=${expire}`,
-            };
-
-            if (userAgent && userAgent.includes('mozilla')) {
-              return new Response(`${vlxxxConfig}`, { status: 200, headers });
+            proxyIP = env.PROXYIP || env.proxyip || proxyIP;
+            proxyIPs = await 整理(proxyIP);
+            proxyIP = proxyIPs[Math.floor(Math.random() * proxyIPs.length)];
+            proxyIP = proxyIP ? proxyIP.toLowerCase() : request.cf.colo + '.PrOXYip.CMLiussss.NeT';
+            socks5Address = env.HTTP || env.SOCKS5 || socks5Address;
+            socks5s = await 整理(socks5Address);
+            socks5Address = socks5s[Math.floor(Math.random() * socks5s.length)];
+            enableHttp = env.HTTP ? true : socks5Address.toLowerCase().includes('http://');
+            socks5Address = socks5Address.split('//')[1] || socks5Address;
+            if (env.GO2SOCKS5) go2Socks5s = await 整理(env.GO2SOCKS5);
+            if (env.CFPORTS) httpsPorts = await 整理(env.CFPORTS);
+            if (env.BAN) banHosts = await 整理(env.BAN);
+            if (socks5Address) {
+                try {
+                    socks5AddressParser(socks5Address);
+                    请求CF反代IP = env.RPROXYIP || 'false';
+                    enableSocks = true;
+                } catch (err) {
+                    let e = err;
+                    console.log(e.toString());
+                    请求CF反代IP = env.RPROXYIP || !proxyIP ? 'true' : 'false';
+                    enableSocks = false;
+                }
             } else {
-              headers['Content-Disposition'] = `attachment; filename=${FileName}; filename*=utf-8''${encodeURIComponent(FileName)}`;
-              return new Response(`${vlxxxConfig}`, { status: 200, headers });
+                请求CF反代IP = env.RPROXYIP || !proxyIP ? 'true' : 'false';
             }
-          }
-          default:
-            return new Response('Not found', { status: 404 });
-        }
-      } else {
-        // websocket upgrade path
-        // parse some parameters from url path and query
 
-        // ---------- 替换开始 ----------
-        /**
-         * 解析 proxyIP 的规则（局部变量，不直接受全局 proxyIP 影响）
-         * 规则：
-         *  1. 优先读取查询参数 ?proxyip=xxx 作为候选
-         *  2. 如果路径是 /proxyip=xxx 或 /proxyip.xxx，则以路径为准（并标记 matchedProxyPath）
-         *  3. 如果路径匹配不上前两条，则检查特定路径（sg/hk/jp/us.dtcs520.com）
-         *  4. 如果前两条路径未匹配（matchedProxyPath === false），**强制覆盖**为默认值 'sg.dtcs520.com'
-         */
-        {
-          // 使用局部变量避免受到上层全局变量的干扰
-		  // 先取 query 参数
-          let pickedProxyIP = url.searchParams.get('proxyip'); // query 参数优先,可能为 null 或 ''
-          let matchedProxyPath = false;          // 标记路径匹配是否成功
-          const path = url.pathname.toLowerCase();
+            const upgradeHeader = request.headers.get('Upgrade');
+            const url = new URL(request.url);
+            if (!upgradeHeader || upgradeHeader !== 'websocket') {
+                if (env.ADD) addresses = await 整理(env.ADD);
+                if (env.ADDAPI) addressesapi = await 整理(env.ADDAPI);
+                if (env.ADDNOTLS) addressesnotls = await 整理(env.ADDNOTLS);
+                if (env.ADDNOTLSAPI) addressesnotlsapi = await 整理(env.ADDNOTLSAPI);
+                if (env.ADDCSV) addressescsv = await 整理(env.ADDCSV);
+                DLS = Number(env.DLS) || DLS;
+                remarkIndex = Number(env.CSVREMARK) || remarkIndex;
+                BotToken = env.TGTOKEN || BotToken;
+                ChatID = env.TGID || ChatID;
+                FileName = env.SUBNAME || FileName;
+                subEmoji = env.SUBEMOJI || env.EMOJI || subEmoji;
+                if (subEmoji == '0') subEmoji = 'false';
+                if (env.LINK) link = await 整理(env.LINK);
+                let sub = env.SUB || '';
+                subConverter = env.SUBAPI || subConverter;
+                if (subConverter.includes("http://")) {
+                    subConverter = subConverter.split("//")[1];
+                    subProtocol = 'http';
+                } else {
+                    subConverter = subConverter.split("//")[1] || subConverter;
+                }
+                subConfig = env.SUBCONFIG || subConfig;
+                if (url.searchParams.has('sub') && url.searchParams.get('sub') !== '') sub = url.searchParams.get('sub').toLowerCase();
+                if (url.searchParams.has('notls')) noTLS = 'true';
 
-          // 路径匹配：/proxyip=xxx 或 /proxyip.xxx
-          if (/\/proxyip=/i.test(path)) {
-            pickedProxyIP = path.split('/proxyip=')[1] || '';
-            matchedProxyPath = true;
-          } else if (/\/proxyip\./i.test(path)) {
-            pickedProxyIP = `proxyip.${(path.split('/proxyip.')[1] || '')}`;
-            matchedProxyPath = true;
-          } else if (/sg.dtcs520.com/i.test(path)) {
-            // 特殊路径匹配,（不会影响 matchedProxyPath）
-            pickedProxyIP = 'sg.dtcs520.com';
-          } else if (/hk.dtcs520.com/i.test(path)) {
-            pickedProxyIP = 'hk.dtcs520.com';
-          } else if (/jp.dtcs520.com/i.test(path)) {
-            pickedProxyIP = 'jp.dtcs520.com';
-          } else if (/us.dtcs520.com/i.test(path)) {
-            pickedProxyIP = 'us.dtcs520.com';
-          }
 
-          // 兜底逻辑：路径没匹配且 query 参数为空
-          if (!matchedProxyPath && (!pickedProxyIP || pickedProxyIP === '')) {
-            pickedProxyIP = 'sg.dtcs520.com';
-          }
 
-          // 最终把局部解析结果写回全局 proxyIP（写回全局变量）
-          proxyIP = pickedProxyIP;
-        }
-        // ---------- 替换结束 ----------
+                SCV = env.SCV || SCV;
+                if (!SCV || SCV == '0' || SCV == 'false') allowInsecure = '';
+                else SCV = 'true';
+                const 路径 = url.pathname.toLowerCase();
+                if (路径 == '/') {
+                    if (env.URL302) return Response.redirect(env.URL302, 302);
+                    else if (env.URL) return await 代理URL(env.URL, url);
+                    else return new Response(await nginx(), {
+                        status: 200,
+                        headers: {
+                            'Content-Type': 'text/html; charset=UTF-8',
+                        },
+                    });
+                } else if (路径 == `/${fakeUserID}`) {
+                    const fakeConfig = await 生成配置信息(userID, request.headers.get('Host'), sub, 'CF-Workers-SUB', 请求CF反代IP, url, fakeUserID, fakeHostName, env);
+                    return new Response(`${fakeConfig}`, { status: 200 });
+                } else if ((url.pathname == `/${动态UUID}/config.json` || 路径 == `/${userID}/config.json`) && url.searchParams.get('token') === await 双重哈希(fakeUserID + UA)) {
+                    return await config_Json(userID, request.headers.get('Host'), sub, UA, 请求CF反代IP, url, fakeUserID, fakeHostName, env);
+                } else if (url.pathname == `/${动态UUID}/edit` || 路径 == `/${userID}/edit`) {
+                    return await KV(request, env);
+                } else if (url.pathname == `/${动态UUID}/bestip` || 路径 == `/${userID}/bestip`) {
+                    return await bestIP(request, env);
+                } else if (url.pathname == `/${动态UUID}` || 路径 == `/${userID}`) {
+                    await sendMessage(`#获取订阅 ${FileName}`, request.headers.get('CF-Connecting-IP'), `UA: ${UA}</tg-spoiler>\n域名: ${url.hostname}\n<tg-spoiler>入口: ${url.pathname + url.search}</tg-spoiler>`);
+                    const vlxxxConfig = await 生成配置信息(userID, request.headers.get('Host'), sub, UA, 请求CF反代IP, url, fakeUserID, fakeHostName, env);
+                    const now = Date.now();
+                    //const timestamp = Math.floor(now / 1000);
+                    const today = new Date(now);
+                    today.setHours(0, 0, 0, 0);
+                    const UD = Math.floor(((now - today.getTime()) / 86400000) * 24 * 1099511627776 / 2);
+                    let pagesSum = UD;
+                    let workersSum = UD;
+                    let total = 24 * 1099511627776;
+                    if ((env.CF_EMAIL && env.CF_APIKEY) || (env.CF_ID && env.CF_APITOKEN)) {
+                        const usage = await getUsage(env.CF_ID, env.CF_EMAIL, env.CF_APIKEY, env.CF_APITOKEN, env.CF_ALL);
+                        pagesSum = usage[1];
+                        workersSum = usage[2];
+                        total = env.CF_ALL ? Number(env.CF_ALL) : (1024 * 100); // 100K
+                    }
+                    if (userAgent && userAgent.includes('mozilla')) {
+                        return new Response(vlxxxConfig, {
+                            status: 200,
+                            headers: {
+                                "Content-Type": "text/html;charset=utf-8",
+                                "Profile-Update-Interval": "6",
+                                "Subscription-Userinfo": `upload=${pagesSum}; download=${workersSum}; total=${total}; expire=${expire}`,
+                                "Cache-Control": "no-store",
+                            }
+                        });
+                    } else {
+                        return new Response(vlxxxConfig, {
+                            status: 200,
+                            headers: {
+                                "Content-Disposition": `attachment; filename=${FileName}; filename*=utf-8''${encodeURIComponent(FileName)}`,
+                                //"Content-Type": "text/plain;charset=utf-8",
+                                "Profile-Update-Interval": "6",
+                                "Profile-web-page-url": request.url.includes('?') ? request.url.split('?')[0] : request.url,
+                                "Subscription-Userinfo": `upload=${pagesSum}; download=${workersSum}; total=${total}; expire=${expire}`,
+                            }
+                        });
+                    }
+                } else {
+                    if (env.URL302) return Response.redirect(env.URL302, 302);
+                    else if (env.URL) return await 代理URL(env.URL, url);
+                    else return new Response('Wrong UUID', { status: 404 });
+                }
+            } else {
+                socks5Address = url.searchParams.get('socks5') || url.searchParams.get('http') || socks5Address;
+                enableHttp = url.searchParams.get('http') ? true : enableHttp;
+                go2Socks5s = url.searchParams.has('globalproxy') ? ['all in'] : go2Socks5s;
 
-		
- 		
-		/*
-        //url.searchParams.get用于匹配查询参数，格式如/?proxyip=jp.dtcs520.com，主要是?号代表查询参数
-        proxyIP = url.searchParams.get('proxyip');
-        //以下都是url.pathname查询方式，用于匹配路径，格式如/proxyip=jp.dtcs520.com，没有?号，只有/代表路径，由于客户端都是传查询参数，即/?proxyip格式，不是/proxyip的路径格式
-        //所以默认以下两条语句不生效，除非客户端路径(PATH)部分写成/proxyip=jp.dtcs520.com，即不带?号的格式才能使以下两条语句生效
-        //另外如果路径PATH写成只有proxyip=(即=号后面没有内容)，会匹配以下第一条规则，但是会使proxyIP的值为空，导致需要proxyIP的访问失败
-        if (/\/proxyip=/i.test(url.pathname)) proxyIP = url.pathname.toLowerCase().split('/proxyip=')[1];
-        else if (/\/proxyip\./i.test(url.pathname)) proxyIP = `proxyip.${url.pathname.toLowerCase().split('/proxyip.')[1]}`;
-        //以下四条是实际使用的内容，使用/sg.dtcs520.com/i（前后/是正则表达式，匹配前后/内的内容，i表示转为小写字符），和(url.pathname)进行路径匹配，只要路径中包含以下4条语句中的一条，则分配对应proxyIP
-        else if (/sg.dtcs520.com/i.test(url.pathname)) proxyIP = 'sg.dtcs520.com';
-        else if (/hk.dtcs520.com/i.test(url.pathname)) proxyIP = 'hk.dtcs520.com';
-        else if (/jp.dtcs520.com/i.test(url.pathname)) proxyIP = 'jp.dtcs520.com';
-        else if (/us.dtcs520.com/i.test(url.pathname)) proxyIP = 'us.dtcs520.com';
-        //下面的语句用于匹配两种情况：
-        //如果路径PATH中的内容为空（不输入任何内容），之前的proxyIP = url.searchParams.get('proxyip');语句的执行结果会认为proxyIP参数为null，即false，匹配下面语句的!proxyIP条件，保底分配proxyIP = 'sg.dtcs520.com'
-        //如果路径PATH中仅输入了/?proxyip=(即=号后面没有内容)，之前的proxyIP = url.searchParams.get('proxyip');语句的执行结果会认为proxyIP为''，即空，匹配下面语句的proxyIP == ''条件，保底分配proxyIP = 'sg.dtcs520.com'
-        else if (!proxyIP || proxyIP == '') proxyIP = 'sg.dtcs520.com';
-        */
-		  
-        socks5Address = url.searchParams.get('socks5') || socks5Address;
-        if (/\/socks5=/i.test(url.pathname)) socks5Address = url.pathname.split('5=')[1];
-        else if (/\/socks:\/\//i.test(url.pathname) || /\/socks5:\/\//i.test(url.pathname)) {
-          socks5Address = url.pathname.split('://')[1].split('#')[0];
-          if (socks5Address.includes('@')) {
-            let userPassword = socks5Address.split('@')[0];
-            const base64Regex = /^(?:[A-Z0-9+\/]{4})*(?:[A-Z0-9+\/]{2}==|[A-Z0-9+\/]{3}=)?$/i;
-            if (base64Regex.test(userPassword) && !userPassword.includes(':')) userPassword = atob(userPassword);
-            socks5Address = `${userPassword}@${socks5Address.split('@')[1]}`;
-          }
-        }
+                if (url.pathname.toLowerCase().includes('/socks5=')) socks5Address = url.pathname.split('5=')[1];
+                else if (url.pathname.toLowerCase().includes('/socks://') || url.pathname.toLowerCase().includes('/socks5://') || url.pathname.toLowerCase().includes('/http://')) {
+                    enableHttp = url.pathname.includes('http://');
+                    socks5Address = url.pathname.split('://')[1].split('#')[0];
+                    if (socks5Address.includes('@')) {
+                        const lastAtIndex = socks5Address.lastIndexOf('@');
+                        let userPassword = socks5Address.substring(0, lastAtIndex).replaceAll('%3D', '=');
+                        const base64Regex = /^(?:[A-Z0-9+/]{4})*(?:[A-Z0-9+/]{2}==|[A-Z0-9+/]{3}=)?$/i;
+                        if (base64Regex.test(userPassword) && !userPassword.includes(':')) userPassword = atob(userPassword);
+                        socks5Address = `${userPassword}@${socks5Address.substring(lastAtIndex + 1)}`;
+                    }
+                    go2Socks5s = ['all in'];//开启全局SOCKS5
+                }
 
-        if (socks5Address) {
-          try {
-            parsedSocks5Address = socks5AddressParser(socks5Address);
-            enableSocks = true;
-          } catch (err) {
-            console.log(err.toString());
-            enableSocks = false;
-          }
-        } else {
-          enableSocks = false;
-        }
+                if (socks5Address) {
+                    try {
+                        socks5AddressParser(socks5Address);
+                        enableSocks = true;
+                    } catch (err) {
+                        let e = err;
+                        console.log(e.toString());
+                        enableSocks = false;
+                    }
+                } else {
+                    enableSocks = false;
+                }
 
-        return await vlxxxOverWSHandler(request);
-      }
-    } catch (err) {
-      let e = err;
-      return new Response(e.toString());
-    }
-  }
-};
+                /**
+                * 解析 proxyIP 的规则（局部变量，不直接受全局 proxyIP 影响）
+                * 规则：
+                *  1. 优先读取查询参数 ?proxyip=xxx 作为候选
+                *  2. 如果路径是 /proxyip=xxx 或 /proxyip.xxx，则以路径为准（并标记 matchedProxyPath）
+                *  3. 如果路径匹配不上前两条，则检查特定路径（sg/hk/jp/us.dtcs520.com）
+                *  4. 如果前两条路径未匹配（matchedProxyPath === false），**强制覆盖**为默认值 'sg.dtcs520.com'
+                */
+                {
+                // 使用局部变量避免受到上层全局变量的干扰
+		        // 先取 query 参数
+                let pickedProxyIP = url.searchParams.get('proxyip'); // query 参数优先,可能为 null 或 ''
+                let matchedProxyPath = false;          // 标记路径匹配是否成功
+                const path = url.pathname.toLowerCase();
 
-// -------------------------------
-// VLXXX WebSocket handler
-// -------------------------------
+                // 路径匹配：/proxyip=xxx 或 /proxyip.xxx
+                if (/\/proxyip=/i.test(path)) {
+                  pickedProxyIP = path.split('/proxyip=')[1] || '';
+                  matchedProxyPath = true;
+                } else if (/\/proxyip\./i.test(path)) {
+                  pickedProxyIP = `proxyip.${(path.split('/proxyip.')[1] || '')}`;
+                  matchedProxyPath = true;
+                } else if (/sg.dtcs520.com/i.test(path)) {
+                // 特殊路径匹配,（不会影响 matchedProxyPath）
+                  pickedProxyIP = 'sg.dtcs520.com';
+                } else if (/hk.dtcs520.com/i.test(path)) {
+                  pickedProxyIP = 'hk.dtcs520.com';
+                } else if (/jp.dtcs520.com/i.test(path)) {
+                  pickedProxyIP = 'jp.dtcs520.com';
+                } else if (/us.dtcs520.com/i.test(path)) {
+                  pickedProxyIP = 'us.dtcs520.com';
+                }
 
-/**
- * Handle VLXXX over WebSocket
- * @param {Request} request
- */
-async function vlxxxOverWSHandler(request) {
-  // @ts-ignore
-  const webSocketPair = new WebSocketPair();
-  const [client, webSocket] = Object.values(webSocketPair);
-  webSocket.accept();
+                // 兜底逻辑：路径没匹配且 query 参数为空
+                if (!matchedProxyPath && (!pickedProxyIP || pickedProxyIP === '')) {
+                  pickedProxyIP = 'sg.dtcs520.com';
+                }
 
-  let address = '';
-  let portWithRandomLog = '';
-  const log = (info, event) => {
-    console.log(`[${address}:${portWithRandomLog}] ${info}`, event || '');
-  };
+                // 最终把局部解析结果写回全局 proxyIP（写回全局变量）
+                proxyIP = pickedProxyIP;
+              }
 
-  const earlyDataHeader = request.headers.get('sec-websocket-protocol') || '';
-  const readableWebSocketStream = makeReadableWebSocketStream(webSocket, earlyDataHeader, log);
+                      return handleWebSocket(request);
+                  }
+              } catch (err) {
+                  let e = err;
+                  return new Response(e.toString());
+              }
+          },
+      };
 
-  let remoteSocketWrapper = { value: null };
-  let isDns = false;
-
-  readableWebSocketStream.pipeTo(new WritableStream({
-    async write(chunk) {
-      if (isDns) {
-        return await handleDNSQuery(chunk, webSocket, null, log);
-      }
-
-      if (remoteSocketWrapper.value) {
-        const writer = remoteSocketWrapper.value.writable.getWriter();
-        await writer.write(chunk);
-        writer.releaseLock();
-        return;
-      }
-
-      const {
-        hasError,
-        message,
-        addressType,
-        portRemote = 443,
-        addressRemote = '',
-        rawDataIndex,
-        vlxxxVersion = new Uint8Array([0, 0]),
-        isUDP,
-      } = processVlxxxHeader(chunk, userID);
-
-      address = addressRemote;
-      portWithRandomLog = `${portRemote}--${Math.random()} ${isUDP ? 'udp ' : 'tcp '} `;
-
-      if (hasError) {
-        throw new Error(message);
-      }
-
-      if (isUDP) {
-        if (portRemote === 53) {
-          isDns = true;
-        } else {
-          throw new Error('UDP 代理仅对 DNS（53 端口）启用');
-        }
-      }
-
-      const vlxxxResponseHeader = new Uint8Array([vlxxxVersion[0], 0]);
-      const rawClientData = chunk.slice(rawDataIndex);
-
-      if (isDns) {
-        return handleDNSQuery(rawClientData, webSocket, vlxxxResponseHeader, log);
-      }
-
-      log(`处理 TCP 出站连接 ${addressRemote}:${portRemote}`);
-      handleTCPOutBound(remoteSocketWrapper, addressType, addressRemote, portRemote, rawClientData, webSocket, vlxxxResponseHeader, log);
-    },
-    close() {
-      log(`readableWebSocketStream 已关闭`);
-    },
-    abort(reason) {
-      log(`readableWebSocketStream 已中止`, JSON.stringify(reason));
-    },
-  })).catch((err) => {
-    log('readableWebSocketStream 管道错误', err);
-  });
-
-  return new Response(null, { status: 101, // @ts-ignore
-    webSocket: client,
-  });
-}
-
-// -------------------------------
-// Handle outbound TCP
-// -------------------------------
 
 /**
- * Handle TCP outbound connection and data forwarding
+ * 这不是真正的 UUID 验证，而是一个简化的版本
+ * @param {string} uuid 要验证的 UUID 字符串
+ * @returns {boolean} 如果字符串匹配 UUID 格式则返回 true，否则返回 false
  */
-async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portRemote, rawClientData, webSocket, vlxxxResponseHeader, log) {
-  async function connectAndWrite(address, port, socks = false) {
-    log(`attempt connect to ${address}:${port}`);
-
-    // resolve specific domains to IPv4 if desired (kept simple)
-    // 注释整段google DNS解析功能，开头使用 /*，结尾使用*/
-	// 通过将address变量的域名值事先解析成IPv4地址，这样在下面的connect阶段将通过IPv4地址建立TCP会话，从而避免通过IPv6连接
-	//if (address.includes('fast.com') || address.includes('netflix.com') || address.includes('netflix.net') || address.includes('nflxext.com') || address.includes('nflxso.net') || address.includes('nflxvideo.net') || address.includes('nflxsearch.net') || address.includes('nflximg.com')) {
-    if (address.includes('163.com')) {
-      const resolved = await resolveDomainToIPv4(address);
-      if (resolved) address = resolved;
-    }
-
-    async function resolveDomainToIPv4(addr) {
-      try {
-        const resp = await fetch(`https://dns.google/resolve?name=${addr}&type=A`);
-        if (!resp.ok) return null;
-        const data = await resp.json();
-        if (data.Status === 0 && Array.isArray(data.Answer)) {
-          const record = data.Answer.find(r => r.type === 1);
-          return record ? record.data : null;
-        }
-        return null;
-      } catch (e) {
-        console.error('DNS resolution error:', e);
-        return null;
-      }
-    }
-
-    const tcpSocket = socks ? await socks5Connect(addressType, address, port, log) : connect({ hostname: address, port: port });
-    remoteSocket.value = tcpSocket;
-
-    const writer = tcpSocket.writable.getWriter();
-    await writer.write(rawClientData);
-    writer.releaseLock();
-    return tcpSocket;
-  }
-
-  async function retry() {
-    let tcpSocket;
-    if (enableSocks) {
-      tcpSocket = await connectAndWrite(addressRemote, portRemote, true);
-    } else {
-      tcpSocket = await connectAndWrite(proxyIP || addressRemote, portRemote);
-    }
-
-    tcpSocket.closed.catch(error => {
-      console.log('retry tcpSocket closed error', error);
-    }).finally(() => {
-      safeCloseWebSocket(webSocket);
-    });
-
-    remoteSocketToWS(tcpSocket, webSocket, vlxxxResponseHeader, null, log);
-  }
-
-  let tcpSocket = await connectAndWrite(addressRemote, portRemote);
-  remoteSocketToWS(tcpSocket, webSocket, vlxxxResponseHeader, retry, log);
-}
-
-// -------------------------------
-// Convert WebSocket to ReadableStream
-// -------------------------------
-
-function makeReadableWebSocketStream(webSocketServer, earlyDataHeader, log) {
-  let readableStreamCancel = false;
-
-  const stream = new ReadableStream({
-    start(controller) {
-      webSocketServer.addEventListener('message', (event) => {
-        if (readableStreamCancel) return;
-        controller.enqueue(event.data);
-      });
-
-      webSocketServer.addEventListener('close', () => {
-        safeCloseWebSocket(webSocketServer);
-        if (readableStreamCancel) return;
-        controller.close();
-      });
-
-      webSocketServer.addEventListener('error', (err) => {
-        log('WebSocket 服务器发生错误');
-        controller.error(err);
-      });
-
-      const { earlyData, error } = base64ToArrayBuffer(earlyDataHeader);
-      if (error) controller.error(error);
-      else if (earlyData) controller.enqueue(earlyData);
-    },
-    pull(controller) {
-      // placeholder for backpressure logic
-    },
-    cancel(reason) {
-      if (readableStreamCancel) return;
-      log(`可读流被取消，原因是 ${reason}`);
-      readableStreamCancel = true;
-      safeCloseWebSocket(webSocketServer);
-    }
-  });
-
-  return stream;
-}
-
-// -------------------------------
-// Protocol parsing: VLXXX
-// -------------------------------
-
-function processVlxxxHeader(vlxxxBuffer, userID) {
-  if (vlxxxBuffer.byteLength < 24) return { hasError: true, message: 'invalid data' };
-
-  const version = new Uint8Array(vlxxxBuffer.slice(0, 1));
-  let isValidUser = false;
-  try {
-    if (stringify(new Uint8Array(vlxxxBuffer.slice(1, 17))) === userID) isValidUser = true;
-  } catch (e) {
-    return { hasError: true, message: 'invalid user id' };
-  }
-  if (!isValidUser) return { hasError: true, message: 'invalid user' };
-
-  const optLength = new Uint8Array(vlxxxBuffer.slice(17, 18))[0];
-  const command = new Uint8Array(vlxxxBuffer.slice(18 + optLength, 18 + optLength + 1))[0];
-  let isUDP = false;
-  if (command === 1) {
-    // tcp
-  } else if (command === 2) {
-    isUDP = true;
-  } else {
-    return { hasError: true, message: `command ${command} is not support, command 01-tcp,02-udp,03-mux` };
-  }
-
-  const portIndex = 18 + optLength + 1;
-  const portBuffer = vlxxxBuffer.slice(portIndex, portIndex + 2);
-  const portRemote = new DataView(portBuffer).getUint16(0);
-
-  let addressIndex = portIndex + 2;
-  const addressBuffer = new Uint8Array(vlxxxBuffer.slice(addressIndex, addressIndex + 1));
-  const addressType = addressBuffer[0];
-
-  let addressLength = 0;
-  let addressValueIndex = addressIndex + 1;
-  let addressValue = '';
-
-  switch (addressType) {
-    case 1:
-      addressLength = 4;
-      addressValue = new Uint8Array(vlxxxBuffer.slice(addressValueIndex, addressValueIndex + addressLength)).join('.');
-      break;
-    case 2:
-      addressLength = new Uint8Array(vlxxxBuffer.slice(addressValueIndex, addressValueIndex + 1))[0];
-      addressValueIndex += 1;
-      addressValue = new TextDecoder().decode(vlxxxBuffer.slice(addressValueIndex, addressValueIndex + addressLength));
-      break;
-    case 3:
-      addressLength = 16;
-      const dataView = new DataView(vlxxxBuffer.slice(addressValueIndex, addressValueIndex + addressLength));
-      const ipv6 = [];
-      for (let i = 0; i < 8; i++) ipv6.push(dataView.getUint16(i * 2).toString(16));
-      addressValue = ipv6.join(':');
-      break;
-    default:
-      return { hasError: true, message: `invild addressType is ${addressType}` };
-  }
-
-  if (!addressValue) return { hasError: true, message: `addressValue is empty, addressType is ${addressType}` };
-
-  return {
-    hasError: false,
-    addressRemote: addressValue,
-    addressType,
-    portRemote,
-    rawDataIndex: addressValueIndex + addressLength,
-    vlxxxVersion: version,
-    isUDP,
-  };
-}
-
-// -------------------------------
-// Forward remote socket -> WebSocket
-// -------------------------------
-
-async function remoteSocketToWS(remoteSocket, webSocket, vlxxxResponseHeader, retry, log) {
-  let remoteChunkCount = 0;
-  let vlessHeader = vlxxxResponseHeader;
-  let hasIncomingData = false;
-
-  await remoteSocket.readable.pipeTo(new WritableStream({
-    start() {},
-    async write(chunk, controller) {
-      hasIncomingData = true;
-      if (webSocket.readyState !== WS_READY_STATE_OPEN) controller.error('webSocket.readyState is not open, maybe close');
-      if (vlessHeader) {
-        webSocket.send(await new Blob([vlessHeader, chunk]).arrayBuffer());
-        vlessHeader = null;
-      } else {
-        webSocket.send(chunk);
-      }
-    },
-    close() {
-      log(`remoteConnection!.readable is close with hasIncomingData is ${hasIncomingData}`);
-    },
-    abort(reason) {
-      console.error(`remoteConnection!.readable abort`, reason);
-    }
-  })).catch((error) => {
-    console.error(`remoteSocketToWS has exception `, error.stack || error);
-    safeCloseWebSocket(webSocket);
-  });
-
-  if (hasIncomingData === false && retry) {
-    log(`retry`);
-    retry();
-  }
-}
-
-// -------------------------------
-// DNS handling (TCP forward)
-// -------------------------------
-
-async function handleDNSQuery(udpChunk, webSocket, vlxxxResponseHeader, log) {
-  try {
-    const dnsServer = '1.1.1.1';
-    const dnsPort = 53;
-    let vlessHeader = vlxxxResponseHeader;
-    const tcpSocket = connect({ hostname: dnsServer, port: dnsPort });
-    log(`连接到 ${dnsServer}:${dnsPort}`);
-    const writer = tcpSocket.writable.getWriter();
-    await writer.write(udpChunk);
-    writer.releaseLock();
-
-    await tcpSocket.readable.pipeTo(new WritableStream({
-      async write(chunk) {
-        if (webSocket.readyState === WS_READY_STATE_OPEN) {
-          if (vlessHeader) {
-            webSocket.send(await new Blob([vlessHeader, chunk]).arrayBuffer());
-            vlessHeader = null;
-          } else {
-            webSocket.send(chunk);
-          }
-        }
-      },
-      close() {
-        log(`DNS 服务器(${dnsServer}) TCP 连接已关闭`);
-      },
-      abort(reason) {
-        console.error(`DNS 服务器(${dnsServer}) TCP 连接异常中断`, reason);
-      }
-    }));
-  } catch (error) {
-    console.error(`handleDNSQuery 函数发生异常，错误信息: ${error.message}`);
-  }
-}
-
-// -------------------------------
-// SOCKS5 connect and parser
-// -------------------------------
-
-async function socks5Connect(addressType, addressRemote, portRemote, log) {
-  const { username, password, hostname, port } = parsedSocks5Address;
-  const socket = connect({ hostname, port });
-  const socksGreeting = new Uint8Array([5, 2, 0, 2]);
-  const writer = socket.writable.getWriter();
-  await writer.write(socksGreeting);
-  log('已发送 SOCKS5 问候消息');
-
-  const reader = socket.readable.getReader();
-  const encoder = new TextEncoder();
-  let res = (await reader.read()).value;
-  if (res[0] !== 0x05) { log(`SOCKS5 服务器版本错误: 收到 ${res[0]}，期望是 5`); return; }
-  if (res[1] === 0xff) { log('服务器不接受任何认证方法'); return; }
-
-  if (res[1] === 0x02) {
-    log('SOCKS5 服务器需要认证');
-    if (!username || !password) { log('请提供用户名和密码'); return; }
-    const authRequest = new Uint8Array([1, username.length, ...encoder.encode(username), password.length, ...encoder.encode(password)]);
-    await writer.write(authRequest);
-    res = (await reader.read()).value;
-    if (res[0] !== 0x01 || res[1] !== 0x00) { log('SOCKS5 服务器认证失败'); return; }
-  }
-
-  let DSTADDR;
-  switch (addressType) {
-    case 1:
-      DSTADDR = new Uint8Array([1, ...addressRemote.split('.').map(Number)]);
-      break;
-    case 2:
-      DSTADDR = new Uint8Array([3, addressRemote.length, ...encoder.encode(addressRemote)]);
-      break;
-    case 3:
-      DSTADDR = new Uint8Array([4, ...addressRemote.split(':').flatMap(x => [parseInt(x.slice(0, 2), 16), parseInt(x.slice(2), 16)])]);
-      break;
-    default:
-      log(`无效的地址类型: ${addressType}`); return;
-  }
-
-  const socksRequest = new Uint8Array([5, 1, 0, ...DSTADDR, portRemote >> 8, portRemote & 0xff]);
-  await writer.write(socksRequest);
-  log('已发送 SOCKS5 请求');
-
-  res = (await reader.read()).value;
-  if (res[1] === 0x00) { log('SOCKS5 连接已建立'); } else { log('SOCKS5 连接建立失败'); return; }
-  writer.releaseLock();
-  reader.releaseLock();
-  return socket;
-}
-
-function socks5AddressParser(address) {
-  let [latter, former] = address.split('@').reverse();
-  let username, password, hostname, port;
-  if (former) {
-    const formers = former.split(':');
-    if (formers.length !== 2) throw new Error('无效的 SOCKS 地址格式：认证部分必须是 "username:password" 的形式');
-    [username, password] = formers;
-  }
-  const latters = latter.split(':');
-  port = Number(latters.pop());
-  if (isNaN(port)) throw new Error('无效的 SOCKS 地址格式：端口号必须是数字');
-  hostname = latters.join(':');
-  const regex = /^\[.*\]$/;
-  if (hostname.includes(':') && !regex.test(hostname)) throw new Error('无效的 SOCKS 地址格式：IPv6 地址必须用方括号括起来，如 [2001:db8::1]');
-  if (/^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?).){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(hostname)) hostname = `${atob('d3d3Lg==')}${hostname}${atob('LmlwLjA5MDIyNy54eXo=')}`;
-  return { username, password, hostname, port };
-}
-
-// -------------------------------
-// Utility and helpers
-// -------------------------------
-
-function revertFakeInfo(content, userIDVal, hostName, isBase64) {
-  if (isBase64) content = atob(content);
-  content = content.replace(new RegExp(fakeUserID, 'g'), userIDVal).replace(new RegExp(fakeHostName, 'g'), hostName);
-  if (isBase64) content = btoa(content);
-  return content;
-}
-
-async function MD5MD5(text) {
-  const encoder = new TextEncoder();
-  const firstPass = await crypto.subtle.digest('MD5', encoder.encode(text));
-  const firstPassArray = Array.from(new Uint8Array(firstPass));
-  const firstHex = firstPassArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  const secondPass = await crypto.subtle.digest('MD5', encoder.encode(firstHex.slice(7, 27)));
-  const secondPassArray = Array.from(new Uint8Array(secondPass));
-  const secondHex = secondPassArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  return secondHex.toLowerCase();
-}
-
-async function ADD(envadd) {
-  if (!envadd) return [];
-  var addtext = envadd.replace(/[\t|"'\r\n]+/g, ',').replace(/,+/g, ',');
-  if (addtext.charAt(0) == ',') addtext = addtext.slice(1);
-  if (addtext.charAt(addtext.length - 1) == ',') addtext = addtext.slice(0, addtext.length - 1);
-  return addtext.split(',');
-}
-
-function base64ToArrayBuffer(base64Str) {
-  if (!base64Str) return { error: null };
-  try {
-    base64Str = base64Str.replace(/-/g, '+').replace(/_/g, '/');
-    const decode = atob(base64Str);
-    const arryBuffer = Uint8Array.from(decode, (c) => c.charCodeAt(0));
-    return { earlyData: arryBuffer.buffer, error: null };
-  } catch (error) {
-    return { error };
-  }
-}
-
 function isValidUUID(uuid) {
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[4][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  return uuidRegex.test(uuid);
+    // 定义一个正则表达式来匹配 UUID 格式
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[4][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+    // 使用正则表达式测试 UUID 字符串
+    return uuidRegex.test(uuid);
 }
 
-const WS_READY_STATE_OPEN = 1;
-const WS_READY_STATE_CLOSING = 2;
 
-function safeCloseWebSocket(socket) {
-  try {
-    if (!socket) return;
-    if (socket.readyState === WS_READY_STATE_OPEN || socket.readyState === WS_READY_STATE_CLOSING) socket.close();
-  } catch (error) {
-    console.error('safeCloseWebSocket error', error);
-  }
+
+
+
+
+/**
+ * 双重MD5哈希函数
+ * 这个函数对输入文本进行两次MD5哈希，增强安全性
+ * 第二次哈希使用第一次哈希结果的一部分作为输入
+ * 
+ * @param {string} 文本 要哈希的文本
+ * @returns {Promise<string>} 双重哈希后的小写十六进制字符串
+ */
+async function 双重哈希(文本) {
+    const 编码器 = new TextEncoder();
+
+    const 第一次哈希 = await crypto.subtle.digest('MD5', 编码器.encode(文本));
+    const 第一次哈希数组 = Array.from(new Uint8Array(第一次哈希));
+    const 第一次十六进制 = 第一次哈希数组.map(字节 => 字节.toString(16).padStart(2, '0')).join('');
+
+    const 第二次哈希 = await crypto.subtle.digest('MD5', 编码器.encode(第一次十六进制.slice(7, 27)));
+    const 第二次哈希数组 = Array.from(new Uint8Array(第二次哈希));
+    const 第二次十六进制 = 第二次哈希数组.map(字节 => 字节.toString(16).padStart(2, '0')).join('');
+
+    return 第二次十六进制.toLowerCase();
 }
 
-const byteToHex = [];
-for (let i = 0; i < 256; ++i) byteToHex.push((i + 256).toString(16).slice(1));
 
-function unsafeStringify(arr, offset = 0) {
-  return (byteToHex[arr[offset + 0]] + byteToHex[arr[offset + 1]] + byteToHex[arr[offset + 2]] + byteToHex[arr[offset + 3]] + "-" +
-    byteToHex[arr[offset + 4]] + byteToHex[arr[offset + 5]] + "-" +
-    byteToHex[arr[offset + 6]] + byteToHex[arr[offset + 7]] + "-" +
-    byteToHex[arr[offset + 8]] + byteToHex[arr[offset + 9]] + "-" +
-    byteToHex[arr[offset + 10]] + byteToHex[arr[offset + 11]] + byteToHex[arr[offset + 12]] +
-    byteToHex[arr[offset + 13]] + byteToHex[arr[offset + 14]] + byteToHex[arr[offset + 15]]).toLowerCase();
+
+async function 整理(内容) {
+    // 将制表符、双引号、单引号和换行符都替换为逗号
+    // 然后将连续的多个逗号替换为单个逗号
+    var 替换后的内容 = 内容.replace(/[	"'\r\n]+/g, ',').replace(/,+/g, ',');
+
+    // 删除开头和结尾的逗号（如果有的话）
+    if (替换后的内容.charAt(0) == ',') 替换后的内容 = 替换后的内容.slice(1);
+    if (替换后的内容.charAt(替换后的内容.length - 1) == ',') 替换后的内容 = 替换后的内容.slice(0, 替换后的内容.length - 1);
+
+    // 使用逗号分割字符串，得到地址数组
+    const 地址数组 = 替换后的内容.split(',');
+
+    return 地址数组;
 }
 
-function stringify(arr, offset = 0) {
-  const uuid = unsafeStringify(arr, offset);
-  if (!isValidUUID(uuid)) throw TypeError(`生成的 UUID 不符合规范 ${uuid}`);
-  return uuid;
+
+async function nginx() {
+    const text = `
+	<!DOCTYPE html>
+	<html>
+	<head>
+	<title>Welcome to nginx!</title>
+	<style>
+		body {
+			width: 35em;
+			margin: 0 auto;
+			font-family: Tahoma, Verdana, Arial, sans-serif;
+		}
+	</style>
+	</head>
+	<body>
+	<h1>Welcome to nginx!</h1>
+	<p>If you see this page, the nginx web server is successfully installed and
+	working. Further configuration is required.</p>
+	
+	<p>For online documentation and support please refer to
+	<a href="http://nginx.org/">nginx.org</a>.<br/>
+	Commercial support is available at
+	<a href="http://nginx.com/">nginx.com</a>.</p>
+	
+	<p><em>Thank you for using nginx.</em></p>
+	</body>
+	</html>
+	`
+    return text;
 }
 
-// -------------------------------
-// Minimal stubs for missing integrations
-// -------------------------------
 
-async function getVLXXXConfig(userId, host, subVal, ua, rproxy, url) {
-  // Minimal config generator stub. Replace with your real implementation.
-  return `# VLXXX config\nuser:${userId}\nhost:${host}\nsub:${subVal}\nua:${ua}\n`;
+//////////////////////////////////////////////////////////////////////
+// WebSocket 处理函数（简化版，保留 UDP DNS）
+//////////////////////////////////////////////////////////////////////
+async function handleWebSocket(request) {
+  const [client, ws] = Object.values(new WebSocketPair());
+  ws.accept();
+
+  let remote = null,
+      udpWriter = null,
+      isDNS = false;
+
+  new ReadableStream({
+      start(ctrl) {
+          ws.addEventListener('message', e => ctrl.enqueue(e.data));
+          ws.addEventListener('close', () => {
+              remote?.close();
+              ctrl.close();
+          });
+          ws.addEventListener('error', () => {
+              remote?.close();
+              ctrl.error();
+          });
+
+          const early = request.headers.get('sec-websocket-protocol');
+          if (early) {
+              try {
+                  ctrl.enqueue(Uint8Array.from(
+                      atob(early.replace(/-/g, '+').replace(/_/g, '/')),
+                      c => c.charCodeAt(0)
+                  ).buffer);
+              } catch { }
+          }
+      }
+  }).pipeTo(new WritableStream({
+      async write(data) {
+          // UDP DNS 数据优先处理
+          if (isDNS) return udpWriter?.write(data);
+
+          // 如果 TCP 已连接，直接转发数据
+          if (remote) {
+              const w = remote.writable.getWriter();
+              await w.write(data);
+              w.releaseLock();
+              return;
+          }
+
+          if (data.byteLength < 24) return;
+
+          // UUID 验证
+          const uuidBytes = new Uint8Array(data.slice(1, 17));
+          const checkUUID = (uuid) => {
+              const hex = uuid.replace(/-/g, '');
+              for (let i = 0; i < 16; i++) {
+                  if (uuidBytes[i] !== parseInt(hex.substr(i * 2, 2), 16)) return false;
+              }
+              return true;
+          };
+          if (!checkUUID(userID) && !(userIDLow && checkUUID(userIDLow))) return;
+
+          const view = new DataView(data);
+          const version = view.getUint8(0);
+          const optLen = view.getUint8(17);
+          const cmd = view.getUint8(18 + optLen);
+          if (cmd !== 1 && cmd !== 2) return;
+
+          let pos = 19 + optLen;
+          const port = view.getUint16(pos);
+          const type = view.getUint8(pos + 2);
+          pos += 3;
+
+          let addr = '';
+          if (type === 1) {
+              addr = `${view.getUint8(pos)}.${view.getUint8(pos + 1)}.${view.getUint8(pos + 2)}.${view.getUint8(pos + 3)}`;
+              pos += 4;
+          } else if (type === 2) {
+              const len = view.getUint8(pos++);
+              addr = new TextDecoder().decode(data.slice(pos, pos + len));
+              pos += len;
+          } else if (type === 3) {
+              const ipv6 = [];
+              for (let i = 0; i < 8; i++, pos += 2) ipv6.push(view.getUint16(pos).toString(16));
+              addr = ipv6.join(':');
+          } else return;
+
+          if (banHosts.includes(addr)) throw new Error(`黑名单关闭 TCP 出站连接 ${addr}`);
+
+          const header = new Uint8Array([version, 0]);
+          const payload = data.slice(pos);
+
+          // UDP DNS 处理
+          if (cmd === 2) {
+              if (port !== 53) return;
+              isDNS = true;
+              let sent = false;
+              const { readable, writable } = new TransformStream({
+                  transform(chunk, ctrl) {
+                      for (let i = 0; i < chunk.byteLength;) {
+                          const len = new DataView(chunk.slice(i, i + 2)).getUint16(0);
+                          ctrl.enqueue(chunk.slice(i + 2, i + 2 + len));
+                          i += 2 + len;
+                      }
+                  }
+              });
+
+              readable.pipeTo(new WritableStream({
+                  async write(query) {
+                      try {
+                          const resp = await fetch('https://1.1.1.1/dns-query', {
+                              method: 'POST',
+                              headers: { 'content-type': 'application/dns-message' },
+                              body: query
+                          });
+                          if (ws.readyState === 1) {
+                              const result = new Uint8Array(await resp.arrayBuffer());
+                              ws.send(new Uint8Array([...(sent ? [] : header),
+                                  result.length >> 8, result.length & 0xff, ...result
+                              ]));
+                              sent = true;
+                          }
+                      } catch { }
+                  }
+              }));
+              udpWriter = writable.getWriter();
+              return udpWriter.write(payload);
+          }
+
+          // TCP 连接（首次直连 + fallback）
+          let sock = null;
+          try {
+              sock = connect({ hostname: addr, port });
+              await sock.opened;
+          } catch {
+              // 如果直连失败，用 proxyIP 重试
+              try {
+                  sock = connect({ hostname: proxyIP, port: port }); // 硬编码测试
+                  await sock.opened;
+              } catch (err) {
+                  // 两次都失败，直接返回错误（不再连接默认地址）
+                  return { hasError: true, message: `connect failed: ${err.message}` };
+              }
+          }
+
+          remote = sock;
+          const w = sock.writable.getWriter();
+          await w.write(payload);
+          w.releaseLock();
+
+          let sent = false;
+          sock.readable.pipeTo(new WritableStream({
+              write(chunk) {
+                  if (ws.readyState === 1) {
+                      ws.send(sent ? chunk : new Uint8Array([...header, ...new Uint8Array(chunk)]));
+                      sent = true;
+                  }
+              },
+              close: () => ws.readyState === 1 && ws.close(),
+              abort: () => ws.readyState === 1 && ws.close()
+          })).catch(() => { });
+      }
+  })).catch(() => { });
+
+  return new Response(null, { status: 101, webSocket: client });
 }
-
-async function sendMessage(title, ip, body) {
-  // noop or implement Telegram / webhook sending if desired
-  try { console.log('sendMessage', title, ip, body); } catch (e) {}
-}
-
-async function getAccountId(email, key) {
-  // stub to avoid runtime errors
-  return null;
-}
-
-async function getSum(accountId, accountIndex, email, key, startDate, endDate) {
-  return [0, 0];
-}
-
-// -------------------------------
-// Simple helpers to avoid unused errors
-// -------------------------------
-
-// ensure top-level exported names exist if other code relies on them elsewhere
-export {
-  vlxxxOverWSHandler,
-  processVlxxxHeader,
-  handleTCPOutBound,
-  handleDNSQuery,
-  socks5Connect,
-  socks5AddressParser,
-  MD5MD5,
-  ADD,
-};
