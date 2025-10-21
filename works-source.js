@@ -324,123 +324,65 @@ async function vlessOverWSHandler(request) {
 	});
 }
 
-/**
- * 处理出站 TCP 连接。
- *
- * @param {any} remoteSocket 远程 Socket 的包装器，用于存储实际的 Socket 对象
- * @param {number} addressType 要连接的远程地址类型（如 IP 类型：IPv4 或 IPv6）
- * @param {string} addressRemote 要连接的远程地址
- * @param {number} portRemote 要连接的远程端口
- * @param {Uint8Array} rawClientData 要写入的原始客户端数据
- * @param {import("@cloudflare/workers-types").WebSocket} webSocket 用于传递远程 Socket 的 WebSocket
- * @param {Uint8Array} vlessResponseHeader VLESS 响应头部
- * @param {function} log 日志记录函数
- * @returns {Promise<void>} 异步操作的 Promise
- */
-async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portRemote, rawClientData, webSocket, vlessResponseHeader, log,) {
-	/**
-	 * 连接远程服务器并写入数据
-	 * @param {string} address 要连接的地址
-	 * @param {number} port 要连接的端口
-	 * @param {boolean} socks 是否使用 SOCKS5 代理连接
-	 * @returns {Promise<import("@cloudflare/workers-types").Socket>} 连接后的 TCP Socket
-	 */
+async function handleTCPOutBound(
+    remoteSocket,
+    addressType,
+    addressRemote,
+    portRemote,
+    rawClientData,
+    webSocket,
+    vlessResponseHeader,
+    log
+) {
+    /**
+     * 连接远程服务器并写入数据（流式）
+     * @param {string} address
+     * @param {number} port
+     * @param {boolean} socks
+     * @returns {Promise<boolean>} 是否接收到远程数据
+     */
+    async function connectAndWrite(address, port, socks = false) {
+        // 通过 SOCKS5 或直接 TCP 连接
+        const tcpSocket = socks
+            ? await socks5Connect(addressType, address, port, log)
+            : await connect({ hostname: address, port });
 
-	async function connectAndWrite(address, port, socks = false) {
-		/** @type {import("@cloudflare/workers-types").Socket} */
-		log(`connected to ${address}:${port}`);
-		//if (/^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?).){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(address)) address = `${atob('d3d3Lg==')}${address}${atob('LmlwLjA5MDIyNy54eXo=')}`;
+        remoteSocket.value = tcpSocket;
+        let hasIncomingData = false;
 
-		
-		// 注释整段google DNS解析功能，开通使用 /*
-		// 通过将address变量的域名值事先解析成IPv4地址，这样在下面的connect阶段将通过IPv4地址建立TCP会话，从而避免通过IPv6连接
-		//if (address.includes('fast.com') || address.includes('netflix.com') || address.includes('netflix.net') || address.includes('nflxext.com') || address.includes('nflxso.net') || address.includes('nflxvideo.net') || address.includes('nflxsearch.net') || address.includes('nflximg.com')) {
-		if (address.includes('163.com')) {
-			// 解析域名为 IPv4 地址
-			address = await resolveDomainToIPv4(address);
-			} else if (address.includes('263.com') || address.includes('dtcs520.com')) {
-			// 如果域名包含 dtcs520.com，则直接使用 proxyIP 作为目标地址
-			if (typeof proxyIP !== 'undefined' && proxyIP) {
-				log(`using proxyIP ${proxyIP} for ${address}`);
-				address = proxyIP;
-			} else {
-				log(`proxyIP not defined, using original address: ${address}`);
-			}
-		} 
-  
-			//通过google的web DNS服务解析IPv4地址
-			async function resolveDomainToIPv4(address) {
-				try {
-					const response = await fetch(`https://dns.google/resolve?name=${address}&type=A`);
-					
-					// 检查响应状态码
-					if (!response.ok) {
-						console.error(`Failed to fetch DNS data: ${response.status} ${response.statusText}`);
-						return null;
-					}
-			
-					const data = await response.json();
-			
-					// 检查 DNS 解析的结果,google的DNS会解析出多个类型的地址，IPv4地址type为1，并且排在后面，需要通过下面代码筛选
-					if (data.Status === 0 && Array.isArray(data.Answer) && data.Answer.length > 0) {
-						// 查找第一个 type 为 1 的条目
-						const firstIPv4Record = data.Answer.find(record => record.type === 1);
-						
-						if (firstIPv4Record) {
-							// 返回第一个 IPv4 地址
-							return firstIPv4Record.data;
-						} else {
-							console.warn(`No valid A record found for ${address}`);
-							return null;
-						}
-					} else {
-						console.warn(`No valid A record found for ${address}`);
-						return null;
-					}
-				} catch (error) {
-					console.error('DNS resolution error:', error);
-					return null;
-				}
-			}
-		
-		// 注释整段google DNS解析功能，结尾使用 */	
-        
-			
-       const tcpSocket = socks ? await socks5Connect(addressType, address, port, log)
-    : await connect({ hostname: address, port });
+        // TCP -> WebSocket 流式传输
+        tcpSocket.readable.pipeTo(
+            new WritableStream({
+                async write(chunk) {
+                    hasIncomingData = true;
+                    if (vlessResponseHeader) {
+                        await webSocket.send(await new Blob([vlessResponseHeader, chunk]).arrayBuffer());
+                        vlessResponseHeader = null;
+                    } else {
+                        webSocket.send(chunk);
+                    }
+                },
+                close() {
+                    log(`TCP closed, hasIncomingData=${hasIncomingData}`);
+                },
+                abort(reason) {
+                    log('TCP abort', reason);
+                }
+            })
+        ).catch(err => log('pipeTo WS error', err));
 
-   // 流式写法
-   remoteSocket.value = tcpSocket;
-   let hasIncomingData = false;
+        // 首次写入客户端数据（通常是 TLS ClientHello）
+        const writer = tcpSocket.writable.getWriter();
+        await writer.write(rawClientData);
+        writer.releaseLock();
 
-   tcpSocket.readable.pipeTo(new WritableStream({
-       async write(chunk) {
-           hasIncomingData = true;
-           if (vlessResponseHeader) {
-               await webSocket.send(await new Blob([vlessResponseHeader, chunk]).arrayBuffer());
-               vlessResponseHeader = null;
-           } else {
-               webSocket.send(chunk);
-           }
-       },
-       close() { log(`TCP closed, hasIncomingData=${hasIncomingData}`); },
-       abort(reason) { log('TCP abort', reason); }
-   })).catch(err => log('pipeTo WS error', err));
+        return hasIncomingData;
+    }
 
-   // 首次写入
-   const writer = tcpSocket.writable.getWriter();
-   await writer.write(rawClientData);
-   writer.releaseLock();
-
-   return hasIncomingData; // 注意返回是否有数据，用于 retry 判断
-
-    
-
-	/**
-	 * 重试函数：当 Cloudflare 的 TCP Socket 没有传入数据时，我们尝试重定向 IP
-	 * 这可能是因为某些网络问题导致的连接失败
-	 */
-	async function retry() {
+    /**
+     * 重试函数
+     */
+    async function retry() {
         log('Retrying TCP connection...');
         let hasData;
         if (enableSocks) {
@@ -463,6 +405,7 @@ async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portR
         await retry();
     }
 }
+
 
 /**
  * 将 WebSocket 转换为可读流（ReadableStream）
