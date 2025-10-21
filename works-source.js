@@ -406,20 +406,34 @@ async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portR
 		// 注释整段google DNS解析功能，结尾使用 */	
         
 			
-        // 如果指定使用 SOCKS5 代理，则通过 SOCKS5 协议连接；否则直接连接
-		const tcpSocket = socks ? await socks5Connect(addressType, address, port, log)
-			: connect({
-				hostname: address,
-				port: port,
-			});
-		remoteSocket.value = tcpSocket;
-		//log(`connected to ${address}:${port}`);
-		const writer = tcpSocket.writable.getWriter();
-		// 首次写入，通常是 TLS 客户端 Hello 消息
-		await writer.write(rawClientData);
-		writer.releaseLock();
-		return tcpSocket;
-	}
+       const tcpSocket = socks ? await socks5Connect(addressType, address, port, log)
+    : await connect({ hostname: address, port });
+
+   // 流式写法
+   remoteSocket.value = tcpSocket;
+   let hasIncomingData = false;
+
+   tcpSocket.readable.pipeTo(new WritableStream({
+       async write(chunk) {
+           hasIncomingData = true;
+           if (vlessResponseHeader) {
+               await webSocket.send(await new Blob([vlessResponseHeader, chunk]).arrayBuffer());
+               vlessResponseHeader = null;
+           } else {
+               webSocket.send(chunk);
+           }
+       },
+       close() { log(`TCP closed, hasIncomingData=${hasIncomingData}`); },
+       abort(reason) { log('TCP abort', reason); }
+   })).catch(err => log('pipeTo WS error', err));
+
+   // 首次写入
+   const writer = tcpSocket.writable.getWriter();
+   await writer.write(rawClientData);
+   writer.releaseLock();
+
+   return hasIncomingData; // 注意返回是否有数据，用于 retry 判断
+
     
 
 	/**
@@ -427,30 +441,27 @@ async function handleTCPOutBound(remoteSocket, addressType, addressRemote, portR
 	 * 这可能是因为某些网络问题导致的连接失败
 	 */
 	async function retry() {
-		if (enableSocks) {
-			// 如果启用了 SOCKS5，通过 SOCKS5 代理重试连接
-			tcpSocket = await connectAndWrite(addressRemote, portRemote, true);
-		} else {
-			// 否则，尝试使用预设的代理 IP（如果有）或原始地址重试连接
-			tcpSocket = await connectAndWrite(proxyIP || addressRemote, portRemote);
-		}
-		// 无论重试是否成功，都要关闭 WebSocket（可能是为了重新建立连接）
-		tcpSocket.closed.catch(error => {
-			console.log('retry tcpSocket closed error', error);
-		}).finally(() => {
-			safeCloseWebSocket(webSocket);
-		})
-		// 建立从远程 Socket 到 WebSocket 的数据流
-		remoteSocketToWS(tcpSocket, webSocket, vlessResponseHeader, null, log);
-	}
+        log('Retrying TCP connection...');
+        let hasData;
+        if (enableSocks) {
+            hasData = await connectAndWrite(addressRemote, portRemote, true);
+        } else {
+            hasData = await connectAndWrite(proxyIP || addressRemote, portRemote);
+        }
 
-	// 首次尝试连接远程服务器
-	let tcpSocket = await connectAndWrite(addressRemote, portRemote);
+        if (!hasData) {
+            log('Retry failed: no data from TCP socket');
+            safeCloseWebSocket(webSocket);
+        }
+    }
 
-	// 当远程 Socket 就绪时，将其传递给 WebSocket
-	// 建立从远程服务器到 WebSocket 的数据流，用于将远程服务器的响应发送回客户端
-	// 如果连接失败或无数据，retry 函数将被调用进行重试
-	remoteSocketToWS(tcpSocket, webSocket, vlessResponseHeader, retry, log);
+    // 首次尝试连接
+    let hasData = await connectAndWrite(addressRemote, portRemote);
+
+    if (!hasData) {
+        // 无数据触发重试
+        await retry();
+    }
 }
 
 /**
