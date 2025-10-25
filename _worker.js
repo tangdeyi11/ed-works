@@ -74,7 +74,7 @@ export default {
             const currentDate = new Date();
             currentDate.setHours(0, 0, 0, 0);
             const timestamp = Math.ceil(currentDate.getTime() / 1000);
-            const fakeUserIDMD5 = await 双重哈希(`${userID}${timestamp}`);
+            const fakeUserIDMD5 = await MD5MD5(`${userID}${timestamp}`);
             const fakeUserID = [
                 fakeUserIDMD5.slice(0, 8),
                 fakeUserIDMD5.slice(8, 12),
@@ -156,9 +156,9 @@ export default {
                         },
                     });
                 } else if (路径 == `/${fakeUserID}`) {
-                    const fakeConfig = await 生成配置信息(userID, request.headers.get('Host'), sub, 'CF-Workers-SUB', 请求CF反代IP, url, fakeUserID, fakeHostName, env);
+                    const fakeConfig = await getVLXXXConfig(userID, request.headers.get('Host'), sub, 'CF-Workers-SUB', url);
                     return new Response(`${fakeConfig}`, { status: 200 });
-                } else if ((url.pathname == `/${动态UUID}/config.json` || 路径 == `/${userID}/config.json`) && url.searchParams.get('token') === await 双重哈希(fakeUserID + UA)) {
+                } else if ((url.pathname == `/${动态UUID}/config.json` || 路径 == `/${userID}/config.json`) && url.searchParams.get('token') === await MD5MD5(fakeUserID + UA)) {
                     return await config_Json(userID, request.headers.get('Host'), sub, UA, 请求CF反代IP, url, fakeUserID, fakeHostName, env);
                 } else if (url.pathname == `/${动态UUID}/edit` || 路径 == `/${userID}/edit`) {
                     return await KV(request, env);
@@ -166,7 +166,7 @@ export default {
                     return await bestIP(request, env);
                 } else if (url.pathname == `/${动态UUID}` || 路径 == `/${userID}`) {
                     await sendMessage(`#获取订阅 ${FileName}`, request.headers.get('CF-Connecting-IP'), `UA: ${UA}</tg-spoiler>\n域名: ${url.hostname}\n<tg-spoiler>入口: ${url.pathname + url.search}</tg-spoiler>`);
-                    const vlxxxConfig = await 生成配置信息(userID, request.headers.get('Host'), sub, UA, 请求CF反代IP, url, fakeUserID, fakeHostName, env);
+                    const vlxxxConfig = await getVLXXXConfig(userID, request.headers.get('Host'), sub, UA, url);
                     const now = Date.now();
                     //const timestamp = Math.floor(now / 1000);
                     const today = new Date(now);
@@ -306,9 +306,16 @@ function isValidUUID(uuid) {
 }
 
 
+//输入UUID后的页面
+async function sendMessage(title, ip, body) {
+    // noop or implement Telegram / webhook sending if desired
+    try { console.log('sendMessage', title, ip, body); } catch (e) {}
+  }
 
-
-
+async function getVLXXXConfig(userId, host, subVal, ua, url) {
+    // Minimal config generator stub. Replace with your real implementation.
+    return `# VLXXX config\nuser:${userId}\nhost:${host}\nsub:${subVal}\nua:${ua}\n`;
+  }
 
 /**
  * 双重MD5哈希函数
@@ -318,19 +325,16 @@ function isValidUUID(uuid) {
  * @param {string} 文本 要哈希的文本
  * @returns {Promise<string>} 双重哈希后的小写十六进制字符串
  */
-async function 双重哈希(文本) {
-    const 编码器 = new TextEncoder();
-
-    const 第一次哈希 = await crypto.subtle.digest('MD5', 编码器.encode(文本));
-    const 第一次哈希数组 = Array.from(new Uint8Array(第一次哈希));
-    const 第一次十六进制 = 第一次哈希数组.map(字节 => 字节.toString(16).padStart(2, '0')).join('');
-
-    const 第二次哈希 = await crypto.subtle.digest('MD5', 编码器.encode(第一次十六进制.slice(7, 27)));
-    const 第二次哈希数组 = Array.from(new Uint8Array(第二次哈希));
-    const 第二次十六进制 = 第二次哈希数组.map(字节 => 字节.toString(16).padStart(2, '0')).join('');
-
-    return 第二次十六进制.toLowerCase();
-}
+async function MD5MD5(text) {
+    const encoder = new TextEncoder();
+    const firstPass = await crypto.subtle.digest('MD5', encoder.encode(text));
+    const firstPassArray = Array.from(new Uint8Array(firstPass));
+    const firstHex = firstPassArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    const secondPass = await crypto.subtle.digest('MD5', encoder.encode(firstHex.slice(7, 27)));
+    const secondPassArray = Array.from(new Uint8Array(secondPass));
+    const secondHex = secondPassArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    return secondHex.toLowerCase();
+  }
 
 
 
