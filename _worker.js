@@ -2,11 +2,6 @@ import { connect } from 'cloudflare:sockets';
 
 let userID = '';
 let proxyIP = '';
-//let sub = '';
-let subConverter = atob('U3ViQXBpLkNtbGlVc3NzUy5OZXQ=');
-let subConfig = atob('aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL0FDTDRTU1IvQUNMNFNTUi9tYXN0ZXIvQ2xhc2gvY29uZmlnL0FDTDRTU1JfT25saW5lX01pbmlfTXVsdGlNb2RlLmluaQ==');
-let subProtocol = 'https';
-let subEmoji = 'true';
 let socks5Address = '';
 let enableSocks = false;
 let enableHttp = false;
@@ -28,21 +23,15 @@ let DLS = 8;
 let remarkIndex = 1;//CSV备注所在列偏移量
 let FileName = atob('ZWRnZXR1bm5lbA==');
 let BotToken;
-let ChatID;
 let proxyhosts = [];
 let proxyhostsURL;
 let 请求CF反代IP = 'false';
-const httpPorts = ["8080", "8880", "2052", "2082", "2086", "2095"];
-let httpsPorts = ["2053", "2083", "2087", "2096", "8443"];
-let 有效时间 = 30;
-let 更新时间 = 3;
 let userIDLow;
 let userIDTime = "";
 let proxyIPPool = [];
 let path = '/?ed=2560';
 let 动态UUID = userID;
 let link = [];
-let banHosts = [atob('c3BlZWQuY2xvdWRmbGFyZS5jb20=')];
 let SCV = 'true';
 let allowInsecure = '&allowInsecure=1';
 
@@ -56,8 +45,6 @@ export default {
             userID = env.UUID || env.uuid || env.PASSWORD || env.pswd || userID;
             if (env.KEY || env.TOKEN || (userID && !isValidUUID(userID))) {
                 动态UUID = env.KEY || env.TOKEN || userID;
-                有效时间 = Number(env.TIME) || 有效时间;
-                更新时间 = Number(env.UPTIME) || 更新时间;
                 const userIDs = await 生成动态UUID(动态UUID);
                 userID = userIDs[0];
                 userIDLow = userIDs[1];
@@ -95,11 +82,8 @@ export default {
             enableHttp = env.HTTP ? true : socks5Address.toLowerCase().includes('http://');
             socks5Address = socks5Address.split('//')[1] || socks5Address;
             if (env.GO2SOCKS5) go2Socks5s = await 整理(env.GO2SOCKS5);
-            if (env.CFPORTS) httpsPorts = await 整理(env.CFPORTS);
-            if (env.BAN) banHosts = await 整理(env.BAN);
             if (socks5Address) {
                 try {
-                    socks5AddressParser(socks5Address);
                     请求CF反代IP = env.RPROXYIP || 'false';
                     enableSocks = true;
                 } catch (err) {
@@ -123,20 +107,9 @@ export default {
                 DLS = Number(env.DLS) || DLS;
                 remarkIndex = Number(env.CSVREMARK) || remarkIndex;
                 BotToken = env.TGTOKEN || BotToken;
-                ChatID = env.TGID || ChatID;
                 FileName = env.SUBNAME || FileName;
-                subEmoji = env.SUBEMOJI || env.EMOJI || subEmoji;
-                if (subEmoji == '0') subEmoji = 'false';
                 if (env.LINK) link = await 整理(env.LINK);
                 let sub = env.SUB || '';
-                subConverter = env.SUBAPI || subConverter;
-                if (subConverter.includes("http://")) {
-                    subConverter = subConverter.split("//")[1];
-                    subProtocol = 'http';
-                } else {
-                    subConverter = subConverter.split("//")[1] || subConverter;
-                }
-                subConfig = env.SUBCONFIG || subConfig;
                 if (url.searchParams.has('sub') && url.searchParams.get('sub') !== '') sub = url.searchParams.get('sub').toLowerCase();
                 if (url.searchParams.has('notls')) noTLS = 'true';
 
@@ -148,7 +121,6 @@ export default {
                 const 路径 = url.pathname.toLowerCase();
                 if (路径 == '/') {
                     if (env.URL302) return Response.redirect(env.URL302, 302);
-                    else if (env.URL) return await 代理URL(env.URL, url);
                     else return new Response(await nginx(), {
                         status: 200,
                         headers: {
@@ -160,10 +132,6 @@ export default {
                     return new Response(`${fakeConfig}`, { status: 200 });
                 } else if ((url.pathname == `/${动态UUID}/config.json` || 路径 == `/${userID}/config.json`) && url.searchParams.get('token') === await MD5MD5(fakeUserID + UA)) {
                     return await config_Json(userID, request.headers.get('Host'), sub, UA, 请求CF反代IP, url, fakeUserID, fakeHostName, env);
-                } else if (url.pathname == `/${动态UUID}/edit` || 路径 == `/${userID}/edit`) {
-                    return await KV(request, env);
-                } else if (url.pathname == `/${动态UUID}/bestip` || 路径 == `/${userID}/bestip`) {
-                    return await bestIP(request, env);
                 } else if (url.pathname == `/${动态UUID}` || 路径 == `/${userID}`) {
                     await sendMessage(`#获取订阅 ${FileName}`, request.headers.get('CF-Connecting-IP'), `UA: ${UA}</tg-spoiler>\n域名: ${url.hostname}\n<tg-spoiler>入口: ${url.pathname + url.search}</tg-spoiler>`);
                     const vlxxxConfig = await getVLXXXConfig(userID, request.headers.get('Host'), sub, UA, url);
@@ -175,12 +143,6 @@ export default {
                     let pagesSum = UD;
                     let workersSum = UD;
                     let total = 24 * 1099511627776;
-                    if ((env.CF_EMAIL && env.CF_APIKEY) || (env.CF_ID && env.CF_APITOKEN)) {
-                        const usage = await getUsage(env.CF_ID, env.CF_EMAIL, env.CF_APIKEY, env.CF_APITOKEN, env.CF_ALL);
-                        pagesSum = usage[1];
-                        workersSum = usage[2];
-                        total = env.CF_ALL ? Number(env.CF_ALL) : (1024 * 100); // 100K
-                    }
                     if (userAgent && userAgent.includes('mozilla')) {
                         return new Response(vlxxxConfig, {
                             status: 200,
@@ -205,7 +167,6 @@ export default {
                     }
                 } else {
                     if (env.URL302) return Response.redirect(env.URL302, 302);
-                    else if (env.URL) return await 代理URL(env.URL, url);
                     else return new Response('Wrong UUID', { status: 404 });
                 }
             } else {
@@ -229,7 +190,6 @@ export default {
 
                 if (socks5Address) {
                     try {
-                        socks5AddressParser(socks5Address);
                         enableSocks = true;
                     } catch (err) {
                         let e = err;
@@ -322,7 +282,7 @@ async function getVLXXXConfig(userId, host, subVal, ua, url) {
  * 这个函数对输入文本进行两次MD5哈希，增强安全性
  * 第二次哈希使用第一次哈希结果的一部分作为输入
  * 
- * @param {string} 文本 要哈希的文本
+ * @param {string} text 要哈希的文本
  * @returns {Promise<string>} 双重哈希后的小写十六进制字符串
  */
 async function MD5MD5(text) {
@@ -488,7 +448,7 @@ async function handleWebSocket(request) {
           addr = ipv6.join(':');
         } else return;
 
-        if (banHosts.includes(addr)) throw new Error(`blocked ${addr}`);
+        
 
         const header = new Uint8Array([version,0]);
         const payload = data.slice(pos);
@@ -533,18 +493,25 @@ async function handleWebSocket(request) {
 
         // --- TCP 连接（首次直连 + fallback） ---
         try {
-          remote = await connect({ hostname: addr, port });
-          await remote.opened;
-        } catch {
+          // 先发起主连接
+          let remoteConn = connect({ hostname: addr, port });
+          let opened = remoteConn.opened;
+          // 同时准备 header / 或者继续解析其他内容
+          await opened; // 等待连接真正建立
+          remote = remoteConn;
+        } catch (e1) {
+          // 主连接失败时再尝试备用 proxyIP
           try {
-            remote = await connect({ hostname: proxyIP, port });
-            await remote.opened;
-          } catch(err){
+            const remoteConn2 = connect({ hostname: proxyIP, port });
+            await remoteConn2.opened;
+            remote = remoteConn2;
+          } catch (err) {
             console.error('TCP connect failed', addr, port, err.message);
             cleanup();
             return;
           }
         }
+        
 
         const writer = remote.writable.getWriter();
         await writer.write(payload);
