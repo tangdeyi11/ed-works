@@ -476,19 +476,43 @@ async function handleWebSocket(request) {
                   headers:{'content-type':'application/dns-message'},
                   body: query
                 });
-                if(ws.readyState===1){
-                  const result = new Uint8Array(await resp.arrayBuffer());
-                  ws.send(new Uint8Array([...header,result.length>>8,result.length&0xff,...result]));
-                }
+                
+				// ① 读取 body
+				let result;
+				try {
+					const buf = await resp.arrayBuffer();
+                    result = new Uint8Array(buf);
+				} catch {
+				  return;
+				}
+				
+				// ② 发送
+				if (ws.readyState === 1) {
+					try {
+						ws.send(new Uint8Array([
+						  ...header,
+						  result.length >> 8,
+						  result.length & 0xff,
+						  ...result
+						 ]));
+					} catch {}
+				}
+						
               } catch(e){
                 console.error('DNS error', e.message);
               }
             },
             close: cleanup,
             abort: cleanup
-          }));
+          }))
+		  .catch(() => cleanup()); 
+		  
           udpWriter = writable.getWriter();
-          return udpWriter.write(payload);
+          try {
+			  await udpWriter.write(payload);
+		  } catch {}
+		  
+		  return;
         }
 
         // --- TCP 连接（首次直连 + fallback） ---
