@@ -91,7 +91,7 @@ export default {
             proxyIPs = proxyIP ? await 整理(proxyIP) : [];
             proxyIP = proxyIPs.length > 0 
                 ? proxyIPs[Math.floor(Math.random() * proxyIPs.length)].toLowerCase()
-                : (request.cf?.colo || 'sg') + '.proxyip.cmliussss.net';
+                : (request.cf?.colo || 'sg') + '.dtcs520.com';
             
             // 请求 CF 反代 IP
             请求CF反代IP = env.RPROXYIP || (!proxyIP ? 'true' : 'false');
@@ -209,7 +209,7 @@ export default {
                  * 规则：
                  *  1. 优先读取查询参数 ?proxyip=xxx 作为候选
                  *  2. 如果路径是 /proxyip=xxx 或 /proxyip.xxx，则以路径为准（并标记 matchedProxyPath）
-                 *  3. 如果路径匹配不上前两条，则检查特定路径（sg/hk/jp/us.dtcs520.com）
+                 *  3. 如果路径匹配不上前两条，则检查特定路径（sg/hk/jp/tw/us.dtcs520.com）
                  *  4. 如果前两条路径未匹配（matchedProxyPath === false），**强制覆盖**为默认值 'sg.dtcs520.com'
                  */
                 {
@@ -232,6 +232,8 @@ export default {
                         pickedProxyIP = 'hk.dtcs520.com';
                     } else if (/jp.dtcs520.com/i.test(path)) {
                         pickedProxyIP = 'jp.dtcs520.com';
+					} else if (/tw.dtcs520.com/i.test(path)) {
+                        pickedProxyIP = 'tw.dtcs520.com';
                     } else if (/us.dtcs520.com/i.test(path)) {
                         pickedProxyIP = 'us.dtcs520.com';
                     }
