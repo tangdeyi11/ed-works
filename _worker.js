@@ -372,6 +372,7 @@ async function handleWebSocket(request) {
   let udpWriter = null;   // UDP 写入器
   let isDNS = false;      // 是否 DNS 模式
   let closed = false;     // 是否已关闭
+  let tcpWriter = null;   // ✅ 新增：TCP 写入器（全局复用）
 
   // 清理函数，保证多次调用安全
   const cleanup = () => {
@@ -422,9 +423,7 @@ async function handleWebSocket(request) {
 
         // --- TCP 已连接直接写入 ---
         if (remote) {
-          const w = remote.writable.getWriter();
-          w.write(data).catch(() => cleanup());
-          w.releaseLock();
+          tcpWriter.write(data).catch(() => cleanup());
           return;
         }
 
@@ -524,12 +523,14 @@ async function handleWebSocket(request) {
           let remoteConn = connect({ hostname: addr, port });
           await remoteConn.opened;
           remote = remoteConn;
+          tcpWriter = remote.writable.getWriter();
         } catch (e1) {
           // 主连接失败，fallback proxyIP
           try {
             const remoteConn2 = connect({ hostname: proxyIP, port });
             await remoteConn2.opened;
             remote = remoteConn2;
+            tcpWriter = remote.writable.getWriter();
           } catch (err) {
             console.error('TCP connect failed', addr, port, err.message);
             cleanup();
@@ -537,9 +538,7 @@ async function handleWebSocket(request) {
           }
         }
 
-        const writer = remote.writable.getWriter();
-        await writer.write(payload);
-        writer.releaseLock();
+        await tcpWriter.write(payload);
 
         // TCP → WebSocket
         let sent=false;
