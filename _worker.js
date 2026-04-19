@@ -373,9 +373,8 @@ async function handleWebSocket(request) {
   let isDNS = false;      // 是否 DNS 模式
   let closed = false;     // 是否已关闭
   let tcpWriter = null;   // ✅ 新增：TCP 写入器（全局复用）
-
-  // ✅ 写入队列（防并发 write 导致异常）
-  let writeQueue = Promise.resolve();
+  let writeQueue = Promise.resolve();  // ✅ 写入队列（防并发 write 导致异常）
+  
 
   function safeWrite(writer, chunk) {
     if (!writer) return;
