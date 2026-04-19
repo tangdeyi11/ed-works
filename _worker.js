@@ -374,12 +374,25 @@ async function handleWebSocket(request) {
   let closed = false;     // 是否已关闭
   let tcpWriter = null;   // ✅ 新增：TCP 写入器（全局复用）
 
+  // ✅ 写入队列（防并发 write 导致异常）
+  let writeQueue = Promise.resolve();
+
+  function safeWrite(writer, chunk) {
+    if (!writer) return;
+
+    writeQueue = writeQueue
+      .then(() => writer.write(chunk))
+      .catch(() => {});
+  }
+  
+
   // 清理函数，保证多次调用安全
   const cleanup = () => {
     if (closed) return;
     closed = true;
+    try { tcpWriter?.releaseLock?.(); } catch {}
     try { remote?.close(); } catch {}
-    try { ws.close(); } catch {}
+    try { ws?.close(); } catch {}
   };
 
   const decoder = new TextDecoder(); // 全局 TextDecoder，用于解析字符串地址
@@ -423,7 +436,7 @@ async function handleWebSocket(request) {
 
         // --- TCP 已连接直接写入 ---
         if (remote) {
-          tcpWriter.write(data).catch(() => cleanup());
+          safeWrite(tcpWriter, data);
           return;
         }
 
@@ -511,7 +524,7 @@ async function handleWebSocket(request) {
             },
             close: cleanup,
             abort: cleanup
-          })).catch(()=>cleanup());
+          })).catch(() => {});
 
           udpWriter = writable.getWriter();
           try { await udpWriter.write(payload); } catch {}
@@ -538,7 +551,7 @@ async function handleWebSocket(request) {
           }
         }
 
-        await tcpWriter.write(payload);
+        safeWrite(tcpWriter, payload);
 
         // TCP → WebSocket
         let sent=false;
@@ -553,7 +566,7 @@ async function handleWebSocket(request) {
           },
           close:cleanup,
           abort:cleanup
-        })).catch(()=>cleanup());
+        })).catch(() => {});
 
       } catch(err){
         console.error('inputStream write error', err.message);
